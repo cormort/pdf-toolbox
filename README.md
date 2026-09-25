@@ -70,7 +70,7 @@ EDGE=<msedge 路徑> node hover-check.mjs   # 找不到 Edge 時自己指定
 ```
 
 它送**真的滑鼠與鍵盤事件**，再讀 computed style，比對的是頁面上的 CSS 變數（所以淺色／深色模式都適用）。
-檢查範圍：首頁分頁、密碼頁的分段控制、主要／次要／危險／停用四種按鈕的 hover、以及鍵盤 focus 的外框。
+檢查範圍：首頁分頁、密碼頁的分段控制、主要／危險／停用三種按鈕的 hover、以及鍵盤 focus 的外框。
 會擋下來的例子：`node hover-check.mjs` 對 `.seg` 的 hover 規則跑一次就會出現
 「✗ 已按下 滑過要維持 --accent：rgb(58, 58, 61)」。
 

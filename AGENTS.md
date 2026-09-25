@@ -16,6 +16,7 @@
 
 - Windows 11，用 Git Bash 跑 `.sh`
 - 需要 Go（版本以 `go.mod` 為準）、Ghostscript 10.08.0（`gswin64c`）、7-Zip、python
+- 有動到 `web/` 底下的樣式時，另外需要 Node 18+ 與 Edge（跑 `node hover-check.mjs`）
 - 工具裝不起來時，放在 `%TEMP%` 底下的暫存資料夾，**不要放進 repo**，也不要改系統 PATH
 - Go 的快取也指到暫存資料夾：`GOPATH`、`GOCACHE`、`GOTOOLCHAIN=local`
 - 在 repo 裡建的暫存測試檔（例如 `zz_tmp_*_test.go`）結束前一定要刪掉
@@ -28,6 +29,7 @@
 gofmt -l .                 # 應該沒有輸出
 go vet ./...               # 應該沒有輸出
 go test -count=1 ./...     # 要有 gs 在 PATH，否則端到端測試會被 Skip（Skip 也要回報）
+node hover-check.mjs       # 只有改到 web/ 的樣式才需要：用 Edge 實際量 hover／focus（會自己起服務）
 go run . -dev              # 另開一個終端機跑；服務在 http://127.0.0.1:17831
 ./smoke.sh                 # API、守衛、各工具的煙霧測試，印出 ✓／✗
 ./build.sh                 # 產出 dist/PdfToolbox.zip
@@ -35,6 +37,10 @@ go run . -dev              # 另開一個終端機跑；服務在 http://127.0.0
 
 `smoke.sh` 之前先確認沒有別的 `PdfToolbox.exe` 在跑（`tasklist | grep -i pdftoolbox`）。
 port 17831 被占用時，`go run . -dev` 會直接結束，`smoke.sh` 就會打到舊的程式，結果不算數。
+
+`hover-check.mjs` 不用等服務起來（它自己起靜態伺服器與 headless Edge）。沒動到樣式時，
+回報裡寫「未測：沒有改到樣式」即可；它擋的是 CSS 權重／順序造成的樣式覆蓋問題，
+那種問題 `gofmt`、`go test`、`smoke.sh` 都看不出來。
 
 ## 已知的陷阱（不是 bug）
 
@@ -58,6 +64,7 @@ README 的「Windows 驗收清單」裡沒打勾的項目需要人或能操作�
 | 步驟 | 結果 |
 | gofmt / vet | 乾淨 / 列出問題 |
 | go test | N/N 通過，Skip 幾個 |
+| hover-check.mjs | 全部通過 / 列出 ✗ 的項目（沒動樣式寫「未測：沒有改到樣式」）|
 | smoke.sh | 全部通過 / 列出 ✗ 的項目與輸出 |
 | build.sh | 成功，zip 大小與 SHA-256 |
 

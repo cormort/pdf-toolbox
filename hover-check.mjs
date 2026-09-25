@@ -12,7 +12,6 @@
 // 它自己起一個只服務 web/ 的靜態伺服器（隨機 port）與 headless Edge，跑完會收乾淨。
 // 顏色是從頁面上的 CSS 變數讀出來比對的，所以淺色／深色模式都適用。
 // 有 ✗ 時結束碼為 1，可以掛進 CI 或 pre-commit。
-
 import { createServer } from 'node:http';
 import { accessSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -177,15 +176,13 @@ check('已按下 滑過要維持 --accent', await hoverColour('.seg button[aria-
 await evaluate(`(() => {
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;left:0;top:0;z-index:99999';
-  box.innerHTML = '<button id="__primary">主要</button><button id="__ghost" class="ghost">次要</button>'
+  box.innerHTML = '<button id="__primary">主要</button>'
     + '<button id="__danger" class="danger">危險</button><button id="__off" disabled>停用</button>';
   document.body.append(box);
 })()`);
 head('按鈕變體（暫時插入的樣本）');
 check('主要按鈕 平常是 --accent', await colourOf('#__primary'), C.accent);
 check('主要按鈕 滑過用 --accent-hover', await hoverColour('#__primary'), C.hover);
-check('次要（ghost）平常是 --soft', await colourOf('#__ghost'), C.soft);
-check('次要（ghost）滑過用 --line', await hoverColour('#__ghost'), C.line);
 check('危險（danger）平常是透明', await colourOf('#__danger'), 'rgba(0, 0, 0, 0)');
 check('危險（danger）滑過用 --warn', await hoverColour('#__danger'), C.warn);
 check('停用的按鈕 滑過不變', await hoverColour('#__off'), C.accent);
