@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"mime/multipart"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -246,5 +251,51 @@ func TestRestoreToUnicode(t *testing.T) {
 	}
 	if m := missing(); m != 0 {
 		t.Errorf("仍有 %d 個字型缺 ToUnicode", m)
+	}
+}
+
+// 密碼保護：加密後只有權限密碼能移除；只有權限密碼的檔案不輸入密碼也不能移除
+func TestProtect(t *testing.T) {
+	workDir = t.TempDir()
+	post := func(path string, fields map[string]string) protectResult {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		fw, _ := mw.CreateFormFile("file", "測試.pdf")
+		b, _ := os.ReadFile(path)
+		fw.Write(b)
+		for k, v := range fields {
+			mw.WriteField(k, v)
+		}
+		mw.Close()
+		req := httptest.NewRequest("POST", "/api/protect", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		rec := httptest.NewRecorder()
+		handleProtect(rec, req)
+		var res protectResult
+		json.Unmarshal(rec.Body.Bytes(), &res)
+		return res
+	}
+	outOf := func(res protectResult) string {
+		return filepath.Join(workDir, strings.Split(res.Download, "/")[3], "out.pdf")
+	}
+
+	enc := post("testdata/pdflib_cjk.pdf", map[string]string{"mode": "encrypt", "userPW": "u1", "ownerPW": "o1", "print": "1"})
+	if !enc.OK || !isEncrypted(outOf(enc)) {
+		t.Fatalf("加密失敗：%+v", enc)
+	}
+	if out, _ := exec.Command("pdfinfo", "-upw", "u1", outOf(enc)).Output(); len(out) > 0 && !strings.Contains(string(out), "print:yes copy:no") {
+		t.Errorf("權限不對：%s", out)
+	}
+	for pw, ok := range map[string]bool{"o1": true, "u1": false, "": false, "wrong": false} {
+		if res := post(outOf(enc), map[string]string{"mode": "decrypt", "password": pw}); res.OK != ok || (ok && isEncrypted(outOf(res))) {
+			t.Errorf("用 %q 移除：%+v", pw, res)
+		}
+	}
+	ownerOnly := post("testdata/pdflib_cjk.pdf", map[string]string{"mode": "encrypt", "ownerPW": "o1"})
+	if res := post(outOf(ownerOnly), map[string]string{"mode": "decrypt", "password": ""}); res.OK {
+		t.Error("只有權限密碼的檔案不應該不用密碼就移除")
+	}
+	if res := post(outOf(enc), map[string]string{"mode": "encrypt", "userPW": "x"}); res.OK {
+		t.Error("已加密的檔案不應再加密")
 	}
 }

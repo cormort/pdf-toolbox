@@ -97,6 +97,10 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 	defer func() { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res) }()
 	add := func(format string, a ...any) { res.Report = append(res.Report, fmt.Sprintf(format, a...)) }
 
+	if gsPath == "" {
+		add("%s", noGS)
+		return
+	}
 	id, dir, in, name, msg := receivePDF(w, r)
 	if msg != "" {
 		add("%s", msg)
@@ -163,13 +167,12 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 	res.Download = "/api/file/" + id + "/" + url.PathEscape(name+"_cmyk.pdf")
 }
 
+const noGS = "❌ 找不到 Ghostscript：請把 gs 資料夾放在 PdfToolbox.exe 旁邊（gs\\bin\\gswin64c.exe）。"
+
 // receivePDF 收下上傳的 PDF，存成工作目錄裡的 in.pdf。
 // 暫存檔一律用 ASCII 檔名，原檔名（不含副檔名）只用在下載名稱，避開中文路徑的問題。
 // 失敗時 msg 是給使用者看的訊息。
 func receivePDF(w http.ResponseWriter, r *http.Request) (id, dir, in, name, msg string) {
-	if gsPath == "" {
-		return "", "", "", "", "❌ 找不到 Ghostscript：請把 gs 資料夾放在 PdfToolbox.exe 旁邊（gs\\bin\\gswin64c.exe）。"
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
 	file, hdr, err := r.FormFile("file")
 	if err != nil {

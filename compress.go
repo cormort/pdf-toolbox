@@ -28,6 +28,10 @@ func handleCompress(w http.ResponseWriter, r *http.Request) {
 	res := compressResult{}
 	defer func() { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res) }()
 
+	if gsPath == "" {
+		res.Message = noGS
+		return
+	}
 	id, dir, in, name, msg := receivePDF(w, r)
 	if msg != "" {
 		res.Message = msg

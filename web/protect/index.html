@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>密碼保護</title>
+<style>
+  :root { --bg:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#dcdcd8; --soft:#f6f6f4; --accent:#1d1d1f; --accent-ink:#fff; --warn:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161617; --ink:#ececec; --mute:#98989d; --line:#3a3a3d; --soft:#1f1f21; --accent:#ececec; --accent-ink:#161617; --warn:#ff8a80; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  p.lead { color:var(--mute); margin:0 0 24px; }
+  .modes { display:flex; gap:8px; margin-bottom:16px; }
+  .modes button { background:var(--soft); color:var(--ink); border:1px solid var(--line); }
+  .modes button[aria-pressed=true] { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  #drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:32px 16px; text-align:center; cursor:pointer; background:var(--soft); }
+  #drop.over { border-color:var(--ink); }
+  #drop strong { display:block; font-size:1.1rem; }
+  #file { display:none; }
+  .field { margin:16px 0; }
+  .field label { display:block; font-weight:600; margin-bottom:4px; }
+  .field small { display:block; color:var(--mute); }
+  input[type=password], input[type=text] { box-sizing:border-box; font:inherit; width:100%; max-width:320px; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+  .perms { display:flex; flex-wrap:wrap; gap:6px 20px; }
+  .perms label { font-weight:400; display:inline; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:20px 0; }
+  button, a.btn { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; }
+  button:disabled { opacity:.4; cursor:default; }
+  #msg.warn { color:var(--warn); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>密碼保護</h1>
+  <p class="lead">以 AES-256 加密 PDF，或用權限密碼移除保護。檔案與密碼只在這台電腦處理，不會記錄。</p>
+
+  <div class="modes">
+    <button id="mEnc" aria-pressed="true">加密</button>
+    <button id="mDec" aria-pressed="false">移除密碼</button>
+  </div>
+
+  <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong></label>
+  <input id="file" type="file" accept=".pdf,application/pdf">
+
+  <div id="encForm">
+    <div class="field">
+      <label for="userPW">開啟密碼</label>
+      <input id="userPW" type="password" autocomplete="new-password">
+      <small>開啟檔案時要輸入。留空則任何人都能開啟。</small>
+    </div>
+    <div class="field">
+      <label for="ownerPW">權限密碼</label>
+      <input id="ownerPW" type="password" autocomplete="new-password">
+      <small>用來限制下列權限，之後也要用它才能移除保護。留空則與開啟密碼相同（能開啟就有全部權限）。</small>
+    </div>
+    <div class="field" id="permBox">
+      <label>允許的操作</label>
+      <div class="perms">
+        <label><input type="checkbox" id="print" checked> 列印</label>
+        <label><input type="checkbox" id="copy"> 複製文字與圖片</label>
+        <label><input type="checkbox" id="edit"> 修改、插入或刪除頁面</label>
+        <label><input type="checkbox" id="annot"> 加註解、填寫表單</label>
+      </div>
+      <small>權限限制靠閱讀軟體遵守，無法防止刻意破解；真正機密的內容請用開啟密碼。</small>
+    </div>
+  </div>
+
+  <div id="decForm" hidden>
+    <div class="field">
+      <label for="password">權限密碼</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <small>設定限制時用的密碼。若檔案只設了開啟密碼，就輸入開啟密碼。</small>
+    </div>
+  </div>
+
+  <label><input type="checkbox" id="show"> 顯示密碼</label>
+  <div class="row">
+    <button id="go" disabled>加密</button>
+    <a id="dl" class="btn" hidden>下載</a>
+    <span id="msg"></span>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let file = null, mode = 'encrypt';
+
+function setMode(m) {
+  mode = m;
+  $('mEnc').setAttribute('aria-pressed', m === 'encrypt');
+  $('mDec').setAttribute('aria-pressed', m === 'decrypt');
+  $('encForm').hidden = m !== 'encrypt';
+  $('decForm').hidden = m !== 'decrypt';
+  $('go').textContent = m === 'encrypt' ? '加密' : '移除密碼';
+  $('dl').hidden = true;
+  $('msg').textContent = '';
+}
+$('mEnc').onclick = () => setMode('encrypt');
+$('mDec').onclick = () => setMode('decrypt');
+// 沒有權限密碼時，權限設定沒有意義（開得了檔就有全部權限）
+const syncPerms = () => $('permBox').style.opacity = $('ownerPW').value ? 1 : .5;
+$('ownerPW').oninput = syncPerms;
+syncPerms();
+$('show').onchange = e => document.querySelectorAll('#userPW, #ownerPW, #password').forEach(i => i.type = e.target.checked ? 'text' : 'password');
+
+function pick(f) {
+  if (!f) return;
+  file = f;
+  $('name').textContent = f.name;
+  $('go').disabled = false;
+  $('dl').hidden = true;
+  $('msg').textContent = '';
+}
+$('file').onchange = e => pick(e.target.files[0]);
+const drop = $('drop');
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
+
+$('go').onclick = async () => {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('mode', mode);
+  if (mode === 'encrypt') {
+    if (!$('userPW').value && !$('ownerPW').value) {
+      $('msg').textContent = '請至少設定一種密碼。';
+      $('msg').className = 'warn';
+      return;
+    }
+    body.append('userPW', $('userPW').value);
+    body.append('ownerPW', $('ownerPW').value);
+    for (const p of ['print', 'copy', 'edit', 'annot']) body.append(p, $(p).checked ? '1' : '0');
+  } else {
+    body.append('password', $('password').value);
+  }
+  $('go').disabled = true;
+  $('msg').className = '';
+  $('msg').textContent = '處理中…';
+  try {
+    const res = await (await fetch('/api/protect', { method: 'POST', body })).json();
+    $('msg').textContent = res.ok ? '完成' : res.message;
+    $('msg').className = res.ok ? '' : 'warn';
+    if (res.ok) {
+      $('dl').href = res.download;
+      $('dl').hidden = false;
+    }
+  } catch (e) {
+    $('msg').textContent = '無法連到背景服務：' + e;
+    $('msg').className = 'warn';
+  } finally {
+    $('go').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

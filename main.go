@@ -69,6 +69,7 @@ func main() {
 	mux.HandleFunc("GET /recompose/fonts/NotoSansTC-Regular.ttf", serveCJKFont)
 	mux.HandleFunc("POST /api/cmyk", handleCMYK)
 	mux.HandleFunc("POST /api/compress", handleCompress)
+	mux.HandleFunc("POST /api/protect", handleProtect)
 	mux.HandleFunc("GET /api/file/{id}/{name}", handleFile)
 
 	lastHit.Store(time.Now().Unix())
