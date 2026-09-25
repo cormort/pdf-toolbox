@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 產出 dist/PdfToolbox/（Windows x64 可攜版）與 dist/PdfToolbox.zip。需要 go、7z、curl。
+# 產出 dist/PdfToolbox/（Windows x64 可攜版）與 dist/PdfToolbox.zip。需要 go、7z、curl（zip 可有可無）。
 set -euo pipefail
 cd "$(dirname "$0")"
+# Windows 裝 7-Zip 預設不會加進 PATH
+command -v 7z >/dev/null || [ ! -x "/c/Program Files/7-Zip/7z.exe" ] || PATH="/c/Program Files/7-Zip:$PATH"
 GS_TAG=gs10080   # Ghostscript 10.08.0，官方 Artifex 釋出
 out=dist/PdfToolbox
 rm -rf "$out" && mkdir -p "$out" dist/cache
@@ -28,5 +30,10 @@ cp $vc/x/msvcp140.dll $vc/x/vcruntime140.dll $vc/x/vcruntime140_1.dll "$out/gs/b
 # AGPL：隨附授權；原始碼位置寫在 README
 cp dist/cache/gs/doc/COPYING "$out/gs/" 2>/dev/null || find dist/cache/gs -maxdepth 2 -iname 'COPYING*' -exec cp {} "$out/gs/" \;
 
-(cd dist && rm -f PdfToolbox.zip && zip -qr PdfToolbox.zip PdfToolbox)
+# Git Bash 沒有 zip，改用 7z
+if command -v zip >/dev/null; then
+  (cd dist && rm -f PdfToolbox.zip && zip -qr PdfToolbox.zip PdfToolbox)
+else
+  (cd dist && rm -f PdfToolbox.zip && 7z a -tzip -mx=9 PdfToolbox.zip PdfToolbox >/dev/null)
+fi
 du -sh "$out" dist/PdfToolbox.zip
