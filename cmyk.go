@@ -198,8 +198,14 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// 每個工作目錄只有一個結果檔 out.*（pdf、zip、png、jpg）
+	files, _ := filepath.Glob(filepath.Join(workDir, id, "out.*"))
+	if len(files) != 1 {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(r.PathValue("name")))
-	http.ServeFile(w, r, filepath.Join(workDir, id, "out.pdf"))
+	http.ServeFile(w, r, files[0])
 }
 
 func randomID() string {

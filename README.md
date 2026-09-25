@@ -11,6 +11,7 @@
 | PDF 比對 | [diffpdf-web](https://github.com/cormort/diffpdf-web) | 單一 HTML |
 | 壓縮 PDF | 本 repo（`compress.go`、`web/compress/`） | Go + Ghostscript |
 | 密碼保護 | 本 repo（`protect.go`、`web/protect/`） | Go + pdfcpu |
+| PDF 轉圖片 | 本 repo（`images.go`、`web/images/`） | Go + Ghostscript |
 | RGB → CMYK | 本 repo（Go 重寫 [PDF_RGB2CMYK](https://huggingface.co/spaces/cormort/PDF_RGB2CMYK) 的核心） | Go + Ghostscript |
 
 ## 架構
@@ -74,7 +75,7 @@ CMYK 預檢（原 Python 版的項目已全部移植）：
       經 gs 重寫則中文無法搜尋，暫維持現況；可評估改用 `@cantoo/pdf-lib`
 - [x] 壓縮 PDF（gs，三種程度，色彩不變）：壓縮後在瀏覽器用 pdf.js 逐頁比對文字（NFC、不看順序），有字無法搜尋就警告並列出頁碼
 - [x] 加密／移除密碼（pdfcpu，AES-256）：開啟密碼、權限密碼與四項權限；移除保護比照 Acrobat 必須用權限密碼
-- [ ] PDF 轉圖片（gs）
+- [x] PDF 轉圖片（gs）：PNG／JPG、72–600 dpi、頁碼範圍；多頁打包 ZIP，檔名帶實際頁碼
 
 已知：Ghostscript 重寫 PDF 時，部分字型的文字對應會被丟掉或寫錯（畫面、列印正常，但無法搜尋）。61 份抽樣裡 12 份有此現象；
 pdf-lib 嵌入的 Identity-H 中文字型可把原檔的 ToUnicode 補回（`tounicode.go`，壓縮與 CMYK 都會做），其他情況只能靠壓縮頁的文字比對提醒。

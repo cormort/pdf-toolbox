@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 轉圖片</title>
+<style>
+  :root { --bg:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#dcdcd8; --soft:#f6f6f4; --accent:#1d1d1f; --accent-ink:#fff; --warn:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161617; --ink:#ececec; --mute:#98989d; --line:#3a3a3d; --soft:#1f1f21; --accent:#ececec; --accent-ink:#161617; --warn:#ff8a80; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  p.lead { color:var(--mute); margin:0 0 24px; }
+  #drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:32px 16px; text-align:center; cursor:pointer; background:var(--soft); }
+  #drop.over { border-color:var(--ink); }
+  #drop strong { display:block; font-size:1.1rem; }
+  #file { display:none; }
+  .field { margin:16px 0; }
+  .field > span { display:block; font-weight:600; margin-bottom:4px; }
+  .field small { display:block; color:var(--mute); }
+  .opts { display:flex; flex-wrap:wrap; gap:6px 20px; }
+  input[type=text] { font:inherit; width:100%; max-width:320px; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:20px 0; }
+  button, a.btn { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; }
+  button:disabled { opacity:.4; cursor:default; }
+  .warn { color:var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PDF 轉圖片</h1>
+  <p class="lead">把指定頁面轉成 PNG 或 JPG。多頁會打包成一個 ZIP，檔名帶頁碼。</p>
+
+  <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong></label>
+  <input id="file" type="file" accept=".pdf,application/pdf">
+
+  <div class="field">
+    <span>頁碼</span>
+    <input id="pages" type="text" placeholder="全部">
+    <small>例如 <code>1-3,5,8-</code>（8- 表示第 8 頁到最後）；留空為全部。</small>
+  </div>
+  <div class="field">
+    <span>格式</span>
+    <div class="opts">
+      <label><input type="radio" name="format" value="png" checked> PNG（清晰，適合文字、表格）</label>
+      <label><input type="radio" name="format" value="jpg"> JPG（檔案小，適合照片）</label>
+    </div>
+  </div>
+  <div class="field">
+    <span>解析度</span>
+    <div class="opts">
+      <label><input type="radio" name="dpi" value="72"> 72 dpi（縮圖）</label>
+      <label><input type="radio" name="dpi" value="150" checked> 150 dpi（螢幕、簡報）</label>
+      <label><input type="radio" name="dpi" value="300"> 300 dpi（列印）</label>
+      <label><input type="radio" name="dpi" value="600"> 600 dpi（高品質）</label>
+    </div>
+  </div>
+  <div class="row">
+    <button id="go" disabled>轉換</button>
+    <a id="dl" class="btn" hidden>下載</a>
+    <span id="msg"></span>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let file = null;
+function pick(f) {
+  if (!f) return;
+  file = f;
+  $('name').textContent = f.name;
+  $('go').disabled = false;
+  $('dl').hidden = true;
+  $('msg').textContent = '';
+}
+$('file').onchange = e => pick(e.target.files[0]);
+const drop = $('drop');
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
+
+$('go').onclick = async () => {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('pages', $('pages').value);
+  body.append('format', document.querySelector('[name=format]:checked').value);
+  body.append('dpi', document.querySelector('[name=dpi]:checked').value);
+  $('go').disabled = true;
+  $('dl').hidden = true;
+  $('msg').className = '';
+  const t0 = Date.now();
+  const tick = setInterval(() => $('msg').textContent = `轉換中… ${Math.round((Date.now() - t0) / 1000)} 秒`, 500);
+  try {
+    const res = await (await fetch('/api/images', { method: 'POST', body })).json();
+    $('msg').textContent = res.ok ? '完成' : res.message;
+    $('msg').className = res.ok ? '' : 'warn';
+    if (res.ok) {
+      $('dl').href = res.download;
+      $('dl').textContent = res.download.endsWith('.zip') ? '下載 ZIP' : '下載圖片';
+      $('dl').hidden = false;
+    }
+  } catch (e) {
+    $('msg').textContent = '無法連到背景服務：' + e;
+    $('msg').className = 'warn';
+  } finally {
+    clearInterval(tick);
+    $('go').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

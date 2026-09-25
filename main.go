@@ -70,6 +70,7 @@ func main() {
 	mux.HandleFunc("POST /api/cmyk", handleCMYK)
 	mux.HandleFunc("POST /api/compress", handleCompress)
 	mux.HandleFunc("POST /api/protect", handleProtect)
+	mux.HandleFunc("POST /api/images", handleImages)
 	mux.HandleFunc("GET /api/file/{id}/{name}", handleFile)
 
 	lastHit.Store(time.Now().Unix())

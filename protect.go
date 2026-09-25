@@ -15,7 +15,7 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 )
 
-type protectResult struct {
+type fileResult struct {
 	OK       bool   `json:"ok"`
 	Message  string `json:"message,omitempty"`
 	Download string `json:"download,omitempty"`
@@ -53,7 +53,7 @@ func permissions(r *http.Request) model.PermissionFlags {
 }
 
 func handleProtect(w http.ResponseWriter, r *http.Request) {
-	res := protectResult{}
+	res := fileResult{}
 	defer func() { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res) }()
 
 	id, dir, in, name, msg := receivePDF(w, r)

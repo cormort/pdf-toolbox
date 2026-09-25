@@ -1,11 +1,13 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -257,7 +259,7 @@ func TestRestoreToUnicode(t *testing.T) {
 // 密碼保護：加密後只有權限密碼能移除；只有權限密碼的檔案不輸入密碼也不能移除
 func TestProtect(t *testing.T) {
 	workDir = t.TempDir()
-	post := func(path string, fields map[string]string) protectResult {
+	post := func(path string, fields map[string]string) fileResult {
 		var body bytes.Buffer
 		mw := multipart.NewWriter(&body)
 		fw, _ := mw.CreateFormFile("file", "測試.pdf")
@@ -271,11 +273,11 @@ func TestProtect(t *testing.T) {
 		req.Header.Set("Content-Type", mw.FormDataContentType())
 		rec := httptest.NewRecorder()
 		handleProtect(rec, req)
-		var res protectResult
+		var res fileResult
 		json.Unmarshal(rec.Body.Bytes(), &res)
 		return res
 	}
-	outOf := func(res protectResult) string {
+	outOf := func(res fileResult) string {
 		return filepath.Join(workDir, strings.Split(res.Download, "/")[3], "out.pdf")
 	}
 
@@ -297,5 +299,73 @@ func TestProtect(t *testing.T) {
 	}
 	if res := post(outOf(enc), map[string]string{"mode": "encrypt", "userPW": "x"}); res.OK {
 		t.Error("已加密的檔案不應再加密")
+	}
+}
+
+func TestParsePages(t *testing.T) {
+	for spec, want := range map[string]string{
+		"": "[1 2 3 4 5]", "2": "[2]", "1-3": "[1 2 3]", "4-": "[4 5]", "5,1 , 3": "[1 3 5]",
+		"2-9": "[2 3 4 5]", "3，1～2": "[1 2 3]", "1-2,2-3": "[1 2 3]",
+	} {
+		if got, err := parsePages(spec, 5); err != nil || fmt.Sprint(got) != want {
+			t.Errorf("%q → %v %v，想要 %s", spec, got, err, want)
+		}
+	}
+	for _, bad := range []string{"a", "9", "0", "1-x"} {
+		if _, err := parsePages(bad, 5); err == nil {
+			t.Errorf("%q 應該報錯", bad)
+		}
+	}
+}
+
+// 3 頁 PDF 取第 2-3 頁 → ZIP 裡依實際頁碼命名；只取 1 頁 → 直接給圖
+func TestImages(t *testing.T) {
+	workDir = t.TempDir()
+	initCMYK()
+	if gsPath == "" {
+		t.Skip("沒有 Ghostscript")
+	}
+	ps := filepath.Join(workDir, "3p.ps")
+	os.WriteFile(ps, []byte("%!PS\n1 1 3 { pop 72 72 100 100 rectfill showpage } for\n"), 0o644)
+	pdf := filepath.Join(workDir, "3p.pdf")
+	if _, err := runGS(time.Minute, "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite", "-sOutputFile="+pdf, ps); err != nil {
+		t.Fatal(err)
+	}
+	post := func(fields map[string]string) fileResult {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		fw, _ := mw.CreateFormFile("file", "報告.pdf")
+		b, _ := os.ReadFile(pdf)
+		fw.Write(b)
+		for k, v := range fields {
+			mw.WriteField(k, v)
+		}
+		mw.Close()
+		req := httptest.NewRequest("POST", "/api/images", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		rec := httptest.NewRecorder()
+		handleImages(rec, req)
+		var res fileResult
+		json.Unmarshal(rec.Body.Bytes(), &res)
+		return res
+	}
+	res := post(map[string]string{"pages": "2-", "dpi": "72", "format": "png"})
+	if !res.OK || !strings.HasSuffix(res.Download, url.PathEscape("報告_2張圖.zip")) {
+		t.Fatalf("%+v", res)
+	}
+	zr, err := zip.OpenReader(filepath.Join(workDir, strings.Split(res.Download, "/")[3], "out.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	zr.Close()
+	if fmt.Sprint(names) != "[報告_p002.png 報告_p003.png]" {
+		t.Errorf("ZIP 內容：%v", names)
+	}
+	if res := post(map[string]string{"pages": "3", "format": "jpg"}); !res.OK || !strings.HasSuffix(res.Download, url.PathEscape("報告_p003.jpg")) {
+		t.Errorf("單頁：%+v", res)
 	}
 }
