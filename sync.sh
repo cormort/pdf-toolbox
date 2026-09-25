@@ -23,6 +23,11 @@ fetch pdf_recompose   recompose   index.html instruction.html script.js style.cs
 fetch pdfviewer_v2    viewer      index.html instructions.html style.css script.js db.js \
                                   manifest.json lib icons LICENSE THIRD-PARTY-NOTICES.md
 rm -f web/viewer/icons/compose-icons.py
+# 沒帶 service-worker.js，註冊也一併拿掉，否則每次開閱讀器 console 都有一筆註冊失敗
+perl -0pi -e 's{^if \(.serviceWorker. in navigator\) \{\r?\n.*?\r?\n\}\r?\n}{}ms' web/viewer/script.js
+if grep -n "serviceWorker.register" web/viewer/script.js; then
+  echo "↑ pdfviewer_v2 的 service worker 註冊寫法變了，請更新上面的 perl" >&2; exit 1
+fi
 
 vendor() { # URL 本機路徑
   mkdir -p "web/vendor/$(dirname "$2")"
