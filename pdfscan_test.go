@@ -1,12 +1,34 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
+
+func TestImagePPI(t *testing.T) {
+	img := types.StreamDict{Dict: types.Dict{"Subtype": types.Name("Image"), "Width": types.Integer(300), "Height": types.Integer(150)}}
+	// Form 以 0.5 倍畫同一張圖：顯示尺寸減半，ppi 加倍
+	form := types.StreamDict{Dict: types.Dict{"Subtype": types.Name("Form"),
+		"Matrix": types.Array{types.Float(0.5), types.Integer(0), types.Integer(0), types.Float(0.5), types.Integer(0), types.Integer(0)}},
+		Content: []byte("q 144 0 0 72 0 0 cm /Im1 Do Q")}
+	res := types.Dict{"XObject": types.Dict{"Im1": img, "Fm1": form}}
+	s := newScan()
+	s.images([]byte("q 144 0 0 72 0 0 cm /Im1 Do Q /Fm1 Do "+
+		"q 0 72 -72 0 0 0 cm BI /W 100 /H 100 /IM true ID \x00EI\x01 EI Q"), res, identity, 1, 0)
+	var got []string
+	for _, u := range s.Images {
+		got = append(got, fmt.Sprintf("%dx%d %s", u.xppi, u.yppi, u.kind))
+	}
+	if want := "[150x150 圖片 300x300 圖片 100x100 1 位元遮色片]"; fmt.Sprint(got) != want {
+		t.Errorf("got %v want %s", got, want)
+	}
+}
 
 func TestNeutralRewrite(t *testing.T) {
 	for _, c := range []struct{ in, want string }{

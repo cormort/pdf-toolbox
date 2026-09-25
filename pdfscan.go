@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -22,11 +23,13 @@ type scan struct {
 	Spaces  map[string]bool // 色彩空間家族，如 DeviceRGB、ICC-CMYK
 	Fonts   map[string]bool // 字型名稱 → 是否嵌入
 	Changed int             // 改成灰階的次數
+	Images  []imageUse      // 每一次畫圖（同一張圖畫兩次算兩筆，同 pdfimages）
 	seen    map[int]bool    // 已處理的串流物件號（多頁共用同一串流時只改一次）
+	ocOff   map[int]bool    // 預設關閉的圖層（OCG 物件號）
 }
 
 func newScan() *scan {
-	return &scan{Spaces: map[string]bool{}, Fonts: map[string]bool{}, seen: map[int]bool{}}
+	return &scan{Spaces: map[string]bool{}, Fonts: map[string]bool{}, seen: map[int]bool{}, ocOff: map[int]bool{}}
 }
 
 // scanPDF 盤點 in；out 非空時同時做單色黑改寫，有改到才寫出 out。
@@ -43,10 +46,26 @@ func scanPDF(in, out string) (s *scan, err error) {
 	defer f.Close()
 	ctx, err := api.ReadAndValidate(f, model.NewDefaultConfiguration())
 	if err != nil {
-		return nil, err
+		// 驗證太嚴（例如註解欄位格式不合）就不驗證直接讀：只要頁面樹讀得到就能盤點與改寫
+		f.Seek(0, io.SeekStart)
+		if ctx, err = api.ReadContext(f, model.NewDefaultConfiguration()); err == nil {
+			err = ctx.EnsurePageCount()
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	s = newScan()
 	s.xt, s.rewrite = ctx.XRefTable, out != ""
+	if cat, err := s.xt.Catalog(); err == nil {
+		if off, ok := s.deref(s.dict(s.dict(cat["OCProperties"])["D"])["OFF"]).(types.Array); ok {
+			for _, o := range off {
+				if r, ok := o.(types.IndirectRef); ok {
+					s.ocOff[r.ObjectNumber.Value()] = true
+				}
+			}
+		}
+	}
 	for i := 1; i <= s.xt.PageCount; i++ {
 		d, _, inh, err := s.xt.PageDict(i, false)
 		if err != nil {
@@ -57,10 +76,16 @@ func scanPDF(in, out string) (s *scan, err error) {
 			res = inh.Resources
 		}
 		st := &gstate{}
+		var page bytes.Buffer
 		for _, ref := range s.contentRefs(d["Contents"]) {
 			s.stream(ref, res, st)
+			if sd, ok := s.deref(ref).(types.StreamDict); ok {
+				page.Write(s.decoded(sd))
+				page.WriteByte('\n')
+			}
 		}
 		s.resources(res, 0)
+		s.images(page.Bytes(), res, identity, i, 0)
 	}
 	if s.rewrite && s.Changed > 0 {
 		return s, api.WriteContextFile(ctx, out)
@@ -289,14 +314,13 @@ func fmtNum(v float64) string {
 // 只替換中性色那幾個 token，其餘位元組原樣保留。
 func (s *scan) content(data []byte, res types.Dict, st *gstate) ([]byte, int) {
 	var out bytes.Buffer
-	var ops []tok
 	last, changed := 0, 0
 	replace := func(from, to int, text string) {
 		out.Write(data[last:from])
 		out.WriteString(text)
 		last = to
 	}
-	neutral := func() (float64, bool) {
+	neutral := func(ops []tok) (float64, bool) {
 		if len(ops) != 3 || !ops[0].isNum || !ops[1].isNum || !ops[2].isNum {
 			return 0, false
 		}
@@ -306,7 +330,7 @@ func (s *scan) content(data []byte, res types.Dict, st *gstate) ([]byte, int) {
 		}
 		return 0, false
 	}
-	operator := func(op string, start, end int) {
+	lex(data, func(op string, ops []tok, start, end int) {
 		cur, gray, csOp := &st.f, "g", "cs"
 		if strings.ContainsAny(op[:1], "RCSGK") { // 大寫開頭的色彩運算子是筆畫
 			cur, gray, csOp = &st.s, "G", "CS"
@@ -322,7 +346,7 @@ func (s *scan) content(data []byte, res types.Dict, st *gstate) ([]byte, int) {
 		case "rg", "RG":
 			s.Spaces["DeviceRGB"] = true
 			*cur = colorState{name: "DeviceRGB"}
-			if v, ok := neutral(); ok && s.rewrite {
+			if v, ok := neutral(ops); ok && s.rewrite {
 				replace(ops[0].s, end, fmtNum(v)+" "+gray)
 				cur.switched = true
 				changed++
@@ -347,7 +371,7 @@ func (s *scan) content(data []byte, res types.Dict, st *gstate) ([]byte, int) {
 			if cur.name == "" || !s.isRGB(cur.name, res) {
 				break
 			}
-			if v, ok := neutral(); ok && s.rewrite {
+			if v, ok := neutral(ops); ok && s.rewrite {
 				replace(ops[0].s, end, fmtNum(v)+" "+gray)
 				cur.switched = true
 				changed++
@@ -360,8 +384,18 @@ func (s *scan) content(data []byte, res types.Dict, st *gstate) ([]byte, int) {
 				cur.switched = false
 			}
 		}
+	})
+	if changed == 0 {
+		return nil, 0
 	}
+	out.Write(data[last:])
+	return out.Bytes(), changed
+}
 
+// lex 把內容串流切成 token，每遇到運算子就連同它的運算元呼叫 fn（start、end 是運算子本身的位置）。
+// 行內圖片的 ID 也會呼叫一次（運算元就是 BI 之後的圖片字典），之後跳過二進位資料。
+func lex(data []byte, fn func(op string, ops []tok, start, end int)) {
+	var ops []tok
 	for i := 0; i < len(data); {
 		c := data[i]
 		switch {
@@ -418,19 +452,205 @@ func (s *scan) content(data []byte, res types.Dict, st *gstate) ([]byte, int) {
 				ops = append(ops, tok{s: start, e: i})
 				continue
 			}
-			if word == "ID" { // 行內圖片：跳過二進位資料直到前後都是空白的 EI
+			fn(word, ops, start, i)
+			if word == "ID" { // 跳過二進位資料直到前後都是空白的 EI
 				for i++; i+1 < len(data) && !(data[i] == 'E' && data[i+1] == 'I' && isWS(data[i-1]) && (i+2 == len(data) || isWS(data[i+2]))); i++ {
 				}
 				i += 2
-			} else {
-				operator(word, start, i)
 			}
 			ops = ops[:0]
 		}
 	}
-	if changed == 0 {
-		return nil, 0
+}
+
+// ---- 圖片有效解析度 ----
+
+type imageUse struct {
+	page, w, h int
+	xppi, yppi int
+	kind       string // 圖片、1 位元遮色片、透明遮罩、遮罩、行內圖片
+	color      string
+}
+
+type matrix [6]float64
+
+var identity = matrix{1, 0, 0, 1, 0, 0}
+
+// mul 回傳 m × n；PDF 的 cm 是「新 CTM = cm 矩陣 × 目前 CTM」
+func (m matrix) mul(n matrix) matrix {
+	return matrix{
+		m[0]*n[0] + m[1]*n[2], m[0]*n[1] + m[1]*n[3],
+		m[2]*n[0] + m[3]*n[2], m[2]*n[1] + m[3]*n[3],
+		m[4]*n[0] + m[5]*n[2] + n[4], m[4]*n[1] + m[5]*n[3] + n[5],
 	}
-	out.Write(data[last:])
-	return out.Bytes(), changed
+}
+
+func (s *scan) num(o types.Object) float64 {
+	switch v := s.deref(o).(type) {
+	case types.Integer:
+		return float64(v)
+	case types.Float:
+		return float64(v)
+	}
+	return 0
+}
+
+func (s *scan) decoded(sd types.StreamDict) []byte {
+	if sd.Content == nil && sd.Decode() != nil {
+		return nil
+	}
+	return sd.Content
+}
+
+// addImage 記錄一次繪圖。圖片畫在單位正方形裡，CTM 兩個基底向量的長度就是顯示寬高（pt）。
+func (s *scan) addImage(page int, w, h float64, ctm matrix, kind, color string) {
+	sx, sy := math.Hypot(ctm[0], ctm[1]), math.Hypot(ctm[2], ctm[3])
+	if w <= 0 || h <= 0 || sx == 0 || sy == 0 {
+		return
+	}
+	s.Images = append(s.Images, imageUse{page: page, w: int(w), h: int(h),
+		xppi: int(math.Round(w * 72 / sx)), yppi: int(math.Round(h * 72 / sy)), kind: kind, color: color})
+}
+
+func (s *scan) image(page int, d types.Dict, ctm matrix) {
+	kind, color := "圖片", friendly(s.family(d["ColorSpace"]))
+	if b, _ := s.deref(d["ImageMask"]).(types.Boolean); b {
+		kind, color = "1 位元遮色片", "—"
+	}
+	s.addImage(page, s.num(d["Width"]), s.num(d["Height"]), ctm, kind, color)
+	// 同 pdfimages：透明遮罩與遮罩圖片也各算一張
+	if m := s.dict(d["SMask"]); m != nil {
+		s.addImage(page, s.num(m["Width"]), s.num(m["Height"]), ctm, "透明遮罩", "灰階")
+	}
+	if m, ok := s.deref(d["Mask"]).(types.StreamDict); ok {
+		s.addImage(page, s.num(m.Dict["Width"]), s.num(m.Dict["Height"]), ctm, "遮罩", "—")
+	}
+}
+
+// images 追蹤 CTM 走一段內容，記錄每次畫圖的有效解析度。
+// Form 每被畫一次就以當下的 CTM 重走一次，同一張圖在不同地方縮放不同，ppi 也不同。
+// ponytail: 同一個 Form 每次都重新解碼，一頁畫上千次的檔案才需要快取
+func (s *scan) images(data []byte, res types.Dict, ctm matrix, page, depth int) {
+	var stack []matrix
+	var hidden []bool // 標記內容的巢狀：隱藏圖層裡的東西不會印出來，不列入
+	isHidden := func() bool { return len(hidden) > 0 && hidden[len(hidden)-1] }
+	lex(data, func(op string, ops []tok, _, _ int) {
+		if isHidden() && (op == "Do" || op == "ID") {
+			return
+		}
+		switch op {
+		case "BMC", "BDC":
+			h := isHidden()
+			if op == "BDC" && len(ops) == 2 && ops[0].name == "OC" {
+				h = h || s.ocHidden(s.dict(res["Properties"])[ops[1].name])
+			}
+			hidden = append(hidden, h)
+		case "EMC":
+			if len(hidden) > 0 {
+				hidden = hidden[:len(hidden)-1]
+			}
+		case "q":
+			stack = append(stack, ctm)
+		case "Q":
+			if n := len(stack); n > 0 {
+				ctm, stack = stack[n-1], stack[:n-1]
+			}
+		case "cm":
+			var m matrix
+			if len(ops) != 6 {
+				return
+			}
+			for i, t := range ops {
+				if !t.isNum {
+					return
+				}
+				m[i] = t.num
+			}
+			ctm = m.mul(ctm)
+		case "Do":
+			if len(ops) == 0 || ops[len(ops)-1].name == "" {
+				return
+			}
+			sd, ok := s.deref(s.dict(res["XObject"])[ops[len(ops)-1].name]).(types.StreamDict)
+			if !ok || s.ocHidden(sd.Dict["OC"]) {
+				return
+			}
+			switch sub, _ := sd.Dict["Subtype"].(types.Name); sub {
+			case "Image":
+				s.image(page, sd.Dict, ctm)
+			case "Form":
+				s.formImages(sd, res, ctm, page, depth)
+			}
+		case "gs": // 軟遮罩群組裡的圖（瀏覽器列印的陰影、透明度常見），座標系是設定當下的 CTM
+			if len(ops) == 0 {
+				return
+			}
+			if g, ok := s.deref(s.dict(s.dict(s.dict(res["ExtGState"])[ops[len(ops)-1].name])["SMask"])["G"]).(types.StreamDict); ok {
+				s.formImages(g, res, ctm, page, depth)
+			}
+		case "ID": // 行內圖片：BI 與 ID 之間是縮寫的圖片字典
+			var w, h float64
+			mask := false
+			for i := 0; i+1 < len(ops); i += 2 {
+				switch ops[i].name {
+				case "W", "Width":
+					w = ops[i+1].num
+				case "H", "Height":
+					h = ops[i+1].num
+				case "IM", "ImageMask":
+					mask = string(data[ops[i+1].s:ops[i+1].e]) == "true"
+				}
+			}
+			if mask {
+				s.addImage(page, w, h, ctm, "1 位元遮色片", "—")
+			} else {
+				s.addImage(page, w, h, ctm, "行內圖片", "—")
+			}
+		}
+	})
+}
+
+// formImages 以 Form 自己的 /Matrix 與資源（沒有就沿用外層）走它的內容
+func (s *scan) formImages(sd types.StreamDict, res types.Dict, ctm matrix, page, depth int) {
+	if depth >= 8 {
+		return
+	}
+	m := identity
+	if a, ok := s.deref(sd.Dict["Matrix"]).(types.Array); ok && len(a) == 6 {
+		for i := range m {
+			m[i] = s.num(a[i])
+		}
+	}
+	if r := s.dict(sd.Dict["Resources"]); r != nil {
+		res = r
+	}
+	s.images(s.decoded(sd), res, m.mul(ctm), page, depth+1)
+}
+
+// ocHidden 依文件預設圖層設定判斷 OCG／OCMD 是否隱藏。
+// ponytail: OCMD 一律當 AnyOn（預設策略），/P 其他策略與 /VE 運算式沒處理
+func (s *scan) ocHidden(o types.Object) bool {
+	d := s.dict(o)
+	if d == nil {
+		return false
+	}
+	if t, _ := d["Type"].(types.Name); t == "OCMD" {
+		var refs []types.Object
+		switch v := s.deref(d["OCGs"]).(type) {
+		case types.Array:
+			refs = v
+		case nil:
+			return false
+		default:
+			refs = []types.Object{d["OCGs"]}
+		}
+		for _, r := range refs {
+			if !s.ocHidden(r) {
+				return false
+			}
+		}
+		return len(refs) > 0
+	}
+	r, ok := o.(types.IndirectRef)
+	return ok && s.ocOff[r.ObjectNumber.Value()]
 }

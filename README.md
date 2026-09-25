@@ -25,7 +25,8 @@ PdfToolbox\
 - **生命週期**：首頁每 30 秒 ping，5 分鐘沒請求就自動結束；已在執行時再雙擊只會開視窗。
 - **安全**：只聽 127.0.0.1，拒絕 Host 不符（DNS rebinding）與跨站 POST。
 - **CMYK 不帶 Python**：單色黑前處理（R=G=B 的 RGB 改 DeviceGray → 轉出來只有 K）用 Go + pdfcpu 重寫，
-  轉換本身是一行 Ghostscript，預檢的總墨量／四色黑改用 Go 讀 gs 的點陣輸出。
+  轉換本身是一行 Ghostscript，預檢的總墨量／四色黑改用 Go 讀 gs 的點陣輸出，
+  字型嵌入與圖片有效解析度直接走 PDF 結構（不需要 poppler）。
 
 ## 開發
 
@@ -52,7 +53,8 @@ Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToo
 ## 待辦
 
 CMYK 預檢還沒移植的（原 Python 版有）：
-- [ ] 圖片有效解析度（< 300 / 200 ppi）
+- [x] 圖片有效解析度（< 300 / 200 ppi）：追蹤 CTM、Form、軟遮罩群組與行內圖片，跳過預設隱藏的圖層；
+      與 poppler `pdfimages -list` 在 164 份 PDF、31,892 筆繪圖上逐筆一致（±1 ppi）
 - [ ] 成品尺寸、TrimBox／BleedBox、貼邊未出血
 - [ ] 透明、疊印、特別色
 - [ ] 小字（< 6 pt）與細線（< 0.25 pt）

@@ -163,6 +163,7 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 	} else {
 		add("【轉換後】\n%s\n%s", formatSpaces(after.Spaces), evaluateSpaces(after.Spaces))
 		add("%s", formatFonts(after.Fonts))
+		add("%s", formatImages(after.Images))
 	}
 	add("%s", inspectInk(out, dir))
 	add("⚠️ 本工具產生的是指定 ICC Profile 的 CMYK PDF，不等同於已通過 PDF/X 認證。\n⚠️ 若原始圖片解析度不足，轉成 300 ppi 不會憑空增加細節。")
@@ -210,16 +211,20 @@ var friendlySpace = map[string]string{
 	"ICCBased": "ICC 色彩空間", "Pattern": "圖樣", "Lab": "Lab",
 }
 
+func friendly(family string) string {
+	if f, ok := friendlySpace[family]; ok {
+		return f
+	}
+	return family
+}
+
 func formatSpaces(spaces map[string]bool) string {
 	if len(spaces) == 0 {
 		return "📄 未偵測到明確色彩空間；文件可能主要為純文字或預設黑色物件。"
 	}
 	var names []string
 	for k := range spaces {
-		if f, ok := friendlySpace[k]; ok {
-			k = f
-		}
-		names = append(names, k)
+		names = append(names, friendly(k))
 	}
 	sort.Strings(names)
 	return "🎨 偵測到的色彩空間：" + strings.Join(names, "、")
@@ -255,6 +260,47 @@ func formatFonts(fonts map[string]bool) string {
 	return fmt.Sprintf("❌ 字型預檢：%d 個字型未嵌入。\n%s", len(missing), strings.Join(missing, "\n"))
 }
 
+const (
+	warnPPI     = 300
+	criticalPPI = 200
+)
+
+func formatImages(imgs []imageUse) string {
+	if len(imgs) == 0 {
+		return "ℹ️ 圖片解析度預檢：未偵測到點陣圖片，文件可能主要由文字或向量圖形構成。"
+	}
+	low := func(u imageUse) int { return min(u.xppi, u.yppi) }
+	sorted := append([]imageUse(nil), imgs...)
+	sort.SliceStable(sorted, func(i, j int) bool { return low(sorted[i]) < low(sorted[j]) })
+	warn, crit := 0, 0
+	for _, u := range sorted {
+		if low(u) < warnPPI {
+			warn++
+		}
+		if low(u) < criticalPPI {
+			crit++
+		}
+	}
+	level := fmt.Sprintf("✅ 所有偵測到的圖片均達 %d ppi。", warnPPI)
+	if crit > 0 {
+		level = fmt.Sprintf("❌ 有圖片低於 %d ppi，可能不適合高品質印刷。", criticalPPI)
+	} else if warn > 0 {
+		level = fmt.Sprintf("⚠️ 有圖片介於 %d 至 %d ppi，建議人工確認。", criticalPPI, warnPPI-1)
+	}
+	lines := []string{"🖼️ 圖片解析度預檢", level,
+		fmt.Sprintf("圖片總數：%d（同一張圖畫在不同位置分開計）", len(imgs)),
+		fmt.Sprintf("最低有效解析度：%d ppi", low(sorted[0])),
+		fmt.Sprintf("低於 %d ppi：%d 張", warnPPI, warn),
+		fmt.Sprintf("低於 %d ppi：%d 張", criticalPPI, crit)}
+	for _, u := range sorted[:min(warn, 15)] {
+		lines = append(lines, fmt.Sprintf("• 第 %d 頁：%d × %d ppi（%d × %d 像素）；%s；%s", u.page, u.xppi, u.yppi, u.w, u.h, u.kind, u.color))
+	}
+	if warn > 15 {
+		lines = append(lines, fmt.Sprintf("• 另有 %d 張低於 %d ppi。", warn-15, warnPPI))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // formatPages 把頁碼整理成「1-3, 5, 8」，最多列 12 段。pages 需已排序。
 func formatPages(pages []int) string {
 	var ranges []string
@@ -271,7 +317,7 @@ func formatPages(pages []int) string {
 		i = j + 1
 	}
 	if len(ranges) > 12 {
-		return strings.Join(ranges[:12], ", ") + fmt.Sprintf(" 等 %d 頁", len(pages))
+		return strings.Join(ranges[:12], ", ") + fmt.Sprintf(" 等，共 %d", len(pages))
 	}
 	return strings.Join(ranges, ", ")
 }
