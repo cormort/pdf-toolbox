@@ -8,6 +8,7 @@
 //
 //   node hover-check.mjs            # 需要 Node 22+（用全域 WebSocket）與 Edge，不用先啟動服務
 //   EDGE=<msedge.exe 路徑> node hover-check.mjs
+//   node --no-experimental-websocket hover-check.mjs   # 驗版本守衛：應該印訊息、結束碼 2，不留東西
 //
 // 它自己起一個只服務 web/ 的靜態伺服器（隨機 port）與 headless Edge，跑完會收乾淨。
 // 顏色是從頁面上的 CSS 變數讀出來比對的，所以淺色／深色模式都適用。
@@ -29,9 +30,11 @@ const MIME = {
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// 這支用全域 WebSocket（Node 22 起才預設有）；版本不對時講清楚，不要丟 "WebSocket is not defined"
+// 這支用全域 WebSocket（Node 22 起才預設有）；沒有時講清楚，不要丟 "WebSocket is not defined"。
+// 不能只看版本號：舊版 Node 與「Node 22+ 但關掉 --experimental-websocket」都會缺，訊息兩種都要說得通。
 if (typeof WebSocket === 'undefined') {
-  console.error(`這支需要 Node 22+（用到全域 WebSocket）；目前是 ${process.version}`);
+  console.error(`這支需要全域 WebSocket（Node 22+ 預設就有）；目前是 ${process.version}，`
+    + '但全域 WebSocket 不存在（舊版 Node，或啟動時加了 --no-experimental-websocket）');
   process.exit(2);
 }
 
