@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 重組工具 - 專案說明文件</title>
+    <style>
+        /* --- 整體頁面樣式 --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            background-color: #f4f7f9;
+            color: #333;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        h1, h2, h3 {
+            color: #1a253c;
+            border-bottom: 2px solid #eef2f5;
+            padding-bottom: 10px;
+        }
+
+        /* --- 頁籤樣式 --- */
+        .tab-buttons {
+            overflow: hidden;
+            background-color: #f1f1f1;
+            border-bottom: 1px solid #ccc;
+        }
+
+        .tab-buttons button {
+            background-color: inherit;
+            float: left;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 20px;
+            transition: background-color 0.3s;
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .tab-buttons button:hover {
+            background-color: #ddd;
+        }
+
+        .tab-buttons button.active {
+            background-color: #2c3e50;
+            color: white;
+        }
+
+        /* --- 頁籤內容樣式 --- */
+        .tab-content {
+            padding: 20px 30px;
+            border-top: none;
+        }
+
+        .tab {
+            display: none; /* 預設隱藏 */
+        }
+        
+        /* --- 程式碼區塊樣式 --- */
+        pre {
+            background-color: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        code {
+            font-family: "Fira Code", "Consolas", "Monaco", monospace;
+            font-size: 14px;
+        }
+        
+        /* --- 清單與說明樣式 --- */
+        ul, ol {
+            padding-left: 20px;
+        }
+        
+        li {
+            margin-bottom: 10px;
+        }
+
+        strong {
+            color: #c0392b;
+        }
+
+    </style>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GHGBM401HN"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-GHGBM401HN');
+</script>
+</head>
+<body>
+
+    <div class="container">
+        <h1 style="text-align: center; padding: 20px; margin: 0; background-color: #2c3e50; color: white;">PDF 頁面重組工具 - 專案文件</h1>
+
+        <!-- 頁籤按鈕 -->
+        <div class="tab-buttons">
+            <button class="tab-button" onclick="openTab(event, 'requirements')" id="defaultOpen">開發需求</button>
+            <button class="tab-button" onclick="openTab(event, 'code')">程式碼含註解</button>
+            <button class="tab-button" onclick="openTab(event, 'manual')">使用說明</button>
+        </div>
+
+        <!-- 頁籤內容 -->
+        <div class="tab-content">
+            <!-- 開發需求 Tab -->
+            <div id="requirements" class="tab">
+                <h2>專案目的</h2>
+                <p>
+                    此工具旨在解決使用者需要合併多個 PDF 檔案、重組頁面順序、並生成包含專業目錄的單一 PDF 檔案的需求。傳統方法通常需要使用昂貴的商業軟體且操作繁瑣，本工具透過瀏覽器客戶端技術，提供一個直觀、高效且無需安裝的解決方案。
+                </p>
+
+                <h2>主要功能</h2>
+                <ul>
+                    <li><strong>多檔案上傳：</strong>支援透過拖曳或檔案選擇器一次上傳多個 PDF 檔案。</li>
+                    <li><strong>頁面視覺化：</strong>以縮圖或清單模式預覽所有來源 PDF 的頁面。</li>
+                    <li><strong>彈性頁面選取：</strong>支援單點選取、按住 <code>Shift</code> 鍵進行範圍選取。</li>
+                    <li><strong>直觀排序：</strong>在「已選擇的頁面」面板中，透過拖曳自由調整頁面與章節的順序。</li>
+                    <li><strong>章節分隔：</strong>可新增自訂標題的「小節」，讓產出的目錄更具結構性。</li>
+                    <li><strong>目錄自動生成：</strong>可選擇在最終 PDF 的第一頁自動生成專業的目錄頁，包含頁碼對應。</li>
+                    <li><strong>批次編輯目錄：</strong>提供文字編輯器，可一次性修改所有選定頁面在目錄中顯示的標題，行首每 2 個空白代表縮一層。</li>
+                    <li><strong>讀取來源書籤：</strong>載入 PDF 時自動抽出來源檔既有的書籤（標題、階層、頁碼），可一鍵帶入目錄，省去手打。</li>
+                    <li><strong>寫入 PDF 書籤：</strong>把最終目錄寫成 PDF 原生書籤大綱，在閱讀器左側的書籤面板可直接跳章節（可獨立於「目錄頁」開啟）。</li>
+                    <li><strong>依小節拆成多檔：</strong>每個小節各輸出一個 PDF，下載時打包成 ZIP；檔名可用 <code>{n}</code>／<code>{title}</code> 等變數組成。</li>
+                    <li><strong>一頁多張／騎馬釘：</strong>列印用拼版（2/4/6/9 up），騎馬釘會自動重排頁序，對折後頁碼連續。</li>
+                    <li><strong>版面調整：</strong>可裁掉掃描件的多餘白邊、四邊內縮，或把混雜的頁面尺寸統一成 A4／A5。</li>
+                    <li><strong>分節頁碼編號：</strong>有小節時頁碼會在每個小節重新起算，並可用 <code>[roman-lower]</code> 等行首標記讓該小節改用羅馬數字／中文數字／字母編號。</li>
+                    <li><strong>頁面標記（頁首／頁尾／頁碼）：</strong>三者共用同一組變數與位置邏輯，可各自設定格式與位置。</li>
+                    <li><strong>浮水印／印章：</strong>在成品頁面疊字（例如「機密」），可置中或平鋪，並可用頁面範圍指定只蓋某幾頁。</li>
+                    <li><strong>復原／重做：</strong>所有編輯都能用 Ctrl+Z／Ctrl+Shift+Z（或工具列按鈕）復原，歷史深度 60 步。</li>
+                    <li><strong>工作階段還原：</strong>載入的檔案與編排會自動存在瀏覽器（IndexedDB），重新開啟時可選擇還原。</li>
+                    <li><strong>來源頁面管理：</strong>提供刪除模式，可從來源面板中移除不需要的頁面。</li>
+                    <li><strong>純客戶端運作：</strong>所有操作均在使用者瀏覽器中完成，確保檔案的隱私與安全，無需上傳至伺服器。</li>
+                    <li><strong>保留文字內容：</strong>生成的 PDF 保留原始文字，支援搜尋與複製。</li>
+                    <li><strong>中文字型支援：</strong>內嵌「思源黑體」字型，確保目錄中的中文能正確顯示。</li>
+                </ul>
+                
+                <h2>技術棧</h2>
+                <ul>
+                    <li><strong>前端框架：</strong>原生 HTML, CSS, JavaScript，無任何外部框架，確保輕量與高效。</li>
+                    <li><strong>PDF 渲染：</strong>使用 Mozilla 的 <strong>pdf.js</strong> 函式庫，負責讀取 PDF 檔案並將頁面渲染成 Canvas 圖像以供預覽。</li>
+                    <li><strong>PDF 生成與編輯：</strong>使用 <strong>pdf-lib.js</strong> 函式庫，負責建立新的 PDF 文件、複製來源頁面、新增目錄頁與頁碼等核心功能。</li>
+                    <li><strong>字型處理：</strong>使用 <strong>fontkit</strong>，配合 pdf-lib.js 來註冊並嵌入自訂的 OTF/TTF 字型檔。</li>
+                    <li><s><strong>PDF 加密：</strong></s> <s>原使用 pdf-encryptor 函式庫提供 AES-256 加密功能，<strong>已根據需求移除</strong>。</s></li>
+                </ul>
+                
+                <h2>專案結構</h2>
+                <p>要運行此專案，您需要以下檔案結構：</p>
+                <pre><code>/
+|-- index.html            (主 HTML 檔案)
+|-- instruction.html      (本文件頁)
+|-- style.css             (CSS 樣式表)
+|-- script.js             (主要的 JavaScript 邏輯)
+|-- verify.mjs            (端到端驗證：node verify.mjs)
+|-- README.md
+|-- fonts/
+|   └─ NotoSansTC-Regular.ttf  (思源黑體，用於目錄與頁碼)
+|-- pdf.min.js            (pdf.js 主檔案)
+|-- pdf.worker.min.js     (pdf.js 的 Web Worker)
+|-- pdf-lib.min.js        (PDF 生成與編輯)
+|-- fontkit.umd.min.js    (字型子集化，供 pdf-lib 嵌入中文)
+|-- sortable.min.js       (拖曳排序)
+└─ examples/              (沒有內建；測試檔由 verify.mjs 即時產生)
+</code></pre>
+            </div>
+
+            <!-- 程式碼 Tab -->
+            <div id="code" class="tab">
+                <h2>程式碼總覽</h2>
+                <p>以下程式碼是<strong>執行時直接讀取 repo 內的實際檔案</strong>（<code>index.html</code>／<code>style.css</code>／<code>script.js</code>），
+                不是手抄的副本——手抄的版本曾經與程式碼嚴重脫節。請以本地伺服器開啟本頁（<code>python3 -m http.server</code>），
+                直接開檔（<code>file://</code>）會被 CORS 擋住而顯示載入失敗。</p>
+                
+                <h3>HTML (index.html)</h3>
+                <pre><code data-src="index.html">載入中…</code></pre>
+
+                <h3>CSS (style.css)</h3>
+                <pre><code data-src="style.css">載入中…</code></pre>
+                
+                <h3>JavaScript (script.js)</h3>
+                <pre><code data-src="script.js">載入中…</code></pre>
+            </div>
+
+            <!-- 使用說明 Tab -->
+            <div id="manual" class="tab">
+                <h2>操作指南</h2>
+                <p>請依照以下步驟使用本工具，整個過程非常簡單直觀。</p>
+
+                <ol>
+                    <li>
+                        <h3>第一步：載入 PDF 檔案</h3>
+                        <p>您可以透過兩種方式載入檔案：</p>
+                        <ul>
+                            <li><strong>拖曳檔案：</strong>直接將一個或多個 PDF 檔案從您的電腦桌面或資料夾拖曳到左側標示有「📁 拖曳 PDF 檔案到這裡」的虛線框內。</li>
+                            <li><strong>點擊按鈕：</strong>點擊「選擇檔案」按鈕，然後在跳出的視窗中選擇您想要處理的 PDF 檔案。</li>
+                        </ul>
+                        <p>載入的檔案會顯示在「已載入檔案」清單中，同時其所有頁面會顯示在右側的「原始 PDF 頁面」面板中。</p>
+                    </li>
+
+                    <li>
+                        <h3>第二步：選擇需要的頁面</h3>
+                        <p>在「原始 PDF 頁面」面板中，您可以選擇要包含在新 PDF 中的頁面：</p>
+                        <ul>
+                            <li><strong>單擊：</strong>點擊任何一個頁面縮圖即可選取它。已選取的頁面會出現綠色邊框。</li>
+                            <li><strong>再次單擊：</strong>再次點擊已選取的頁面可以取消選取。</li>
+                            <li><strong>範圍選取：</strong>先點擊一個頁面，然後按住鍵盤上的 <code>Shift</code> 鍵，再點擊另一個頁面，可以一次選取這兩個頁面之間的所有頁面。</li>
+                        </ul>
+                        <p>所有被選取的頁面會按照您點選的順序，出現在下方的「已選擇的頁面」面板中。</p>
+                    </li>
+                    
+                    <li>
+                        <h3>第三步：整理與排序頁面</h3>
+                        <p>在「已選擇的頁面」面板中，您可以對頁面進行最終的整理：</p>
+                        <ul>
+                            <li><strong>拖曳排序：</strong>按住任何頁面左側的「⋮⋮」圖示，然後上下拖曳即可改變其順序。</li>
+                            <li><strong>新增小節：</strong>點擊「➕ 新增小節」按鈕，輸入小節標題（例如：「第一章 合併資產負債表」），這會在目錄中建立一個章節標題，讓結構更清晰。小節本身也可以被拖曳排序。</li>
+                            <li><strong>批次編輯目錄標題：</strong>點擊「✏️ 批次編輯目錄」按鈕，會彈出一個文字編輯器。您可以一次性修改所有頁面在目錄中顯示的標題，每一行對應一個頁面；行首每 2 個空白代表縮一層（同時決定目錄頁縮排與書籤階層）。</li>
+                            <li><strong>帶入來源書籤：</strong>在同一個編輯器裡按「🔖 帶入來源書籤」，會用來源 PDF 既有書籤的標題與階層覆蓋目前的目錄內容。來源沒有書籤時會提示並保留原標題。</li>
+                            <li><strong>移除頁面：</strong>點擊任一頁面右側的「✕」按鈕，可以將其從選取清單中移除。</li>
+                        </ul>
+                    </li>
+
+                    <li>
+                        <h3>第四步：生成最終的 PDF</h3>
+                        <p>完成所有整理後，點擊左下角的綠色按鈕「<strong>生成新的 PDF</strong>」。</p>
+                        <ul>
+                            <li><strong>新增目錄頁：</strong>勾選「新增目錄頁」後，生成的 PDF 第一頁（跨頁時為前幾頁）會有目錄與可點擊的頁碼連結；勾選「新增頁碼」則會在每一頁印上頁碼。</li>
+                            <li><strong>頁面標記：</strong>勾選「#️⃣ 頁面標記（頁首／頁尾／頁碼）」後展開設定。三者共用變數：<code>{n}</code> 頁碼、<code>{total}</code> 總頁數（含目錄頁）、<code>{name}</code> 檔名、<code>{date}</code> 日期。<strong>頁首與頁尾留空就不印</strong>（頁碼留空會退回純數字）；位置各自獨立選擇，邊距與字級三者共用，另有四個頁碼快速套用格式。</li>
+                            <li><strong>浮水印／印章：</strong>勾選「💧 浮水印／印章」後會展開設定：文字（留空就不蓋）、樣式（置中單一／平鋪佈滿）、顏色、字級、透明度、旋轉角度、頁面範圍（例如 <code>1-3,5</code>，留空＝全部）。浮水印畫在最上層，疊上去的字仍然可以搜尋與複製。</li>
+                            <li><strong>寫入書籤：</strong>勾選「🔖 寫入書籤」後，輸出的 PDF 會帶有原生書籤大綱（標題與階層取自最終目錄，支援中文）。書籤與目錄頁可以分開勾選：只勾書籤就不會多出目錄頁，書籤會直接指向內容頁。</li>
+                            <li><strong>先預覽再下載：</strong>點擊生成後會先開啟預覽視窗（直接顯示產出的 PDF），確認無誤再按「下載 PDF」。</li>
+                            <li><strong>命名檔案：</strong>按下載時會彈出視窗讓您確認檔名，確認後瀏覽器才開始下載。</li>
+                        </ul>
+                    </li>
+                </ol>
+
+                <h3>其他功能</h3>
+                <ul>
+                    <li><strong>清除所有檔案：</strong>若要重新開始，可以點擊「🗑️ 清除所有檔案」按鈕（需要點擊兩次以確認）。</li>
+                    <li><strong>刪除來源頁面：</strong>若某個來源檔案中有您完全不需要的頁面，可以點擊「原始 PDF 頁面」面板右上角的「🗑️ 刪除頁面」，此時面板會進入編輯模式，點擊頁面右上角的「✕」即可永久刪除該頁面。再次點擊「✓ 完成」可退出編輯模式。</li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        /**
+         * 頁籤切換邏輯
+         * @param {Event} evt - 點擊事件
+         * @param {string} tabName - 要顯示的頁籤 ID
+         */
+        function openTab(evt, tabName) {
+            // 獲取所有頁籤內容並隱藏它們
+            const tabContents = document.getElementsByClassName("tab");
+            for (let i = 0; i < tabContents.length; i++) {
+                tabContents[i].style.display = "none";
+            }
+
+            // 獲取所有頁籤按鈕並移除 "active" class
+            const tabButtons = document.getElementsByClassName("tab-button");
+            for (let i = 0; i < tabButtons.length; i++) {
+                tabButtons[i].className = tabButtons[i].className.replace(" active", "");
+            }
+
+            // 顯示當前點擊的頁籤內容，並為按鈕添加 "active" class
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+
+        // 預設打開第一個頁籤
+        document.getElementById("defaultOpen").click();
+
+        // 程式碼總覽：直接讀取 repo 內的實際檔案，避免文件與程式碼各寫一份而漂移。
+        // 用 textContent 填入（瀏覽器自動跳脫），失敗時顯示原因而不是留著空白。
+        (async () => {
+            for (const block of document.querySelectorAll('pre code[data-src]')) {
+                const src = block.dataset.src;
+                try {
+                    const res = await fetch('./' + src, { cache: 'no-cache' });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    block.textContent = await res.text();
+                } catch (e) {
+                    block.textContent = `無法讀取 ${src}（${e.message}）。請以本地伺服器開啟本頁，例如：python3 -m http.server`;
+                }
+            }
+        })();
+    </script>
+
+</body>
+</html>

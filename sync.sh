@@ -16,6 +16,8 @@ fetch() {
 fetch pdf-row-shifter row-shifter index.html
 fetch xls2spread      xls2spread  index.html
 fetch diffpdf-web     diffpdf     index.html
+fetch pdf_recompose   recompose   index.html instruction.html script.js style.css pdf.min.js pdf.worker.min.js \
+                                  pdf-lib.min.js fontkit.umd.min.js sortable.min.js fonts
 # 不帶 service-worker.js：本機服務用不到離線快取，留著反而會讓改版後跑舊檔
 fetch pdfviewer_v2    viewer      index.html instructions.html style.css script.js db.js \
                                   manifest.json lib icons LICENSE THIRD-PARTY-NOTICES.md
@@ -31,7 +33,7 @@ vendor https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs        
 vendor https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs  pdfjs-4.10.38/pdf.worker.min.mjs
 vendor https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.3/jspdf.umd.min.js       jspdf-3.0.3/jspdf.umd.min.js
 
-for f in web/row-shifter/index.html web/xls2spread/index.html web/diffpdf/index.html web/viewer/index.html; do
+for f in web/row-shifter/index.html web/xls2spread/index.html web/diffpdf/index.html web/viewer/index.html web/recompose/index.html; do
   perl -0pi -e '
     s{<!-- Google tag \(gtag\.js\) -->.*?</script>\s*<script>.*?</script>\n?}{}s;
     s{<link[^>]*fonts\.(googleapis|gstatic)\.com[^>]*>\n?}{}g;
@@ -42,7 +44,7 @@ for f in web/row-shifter/index.html web/xls2spread/index.html web/diffpdf/index.
 done
 
 # 還有外連就停下來，免得打包後離線才發現缺檔
-if grep -nE "https://(cdn\.|cdnjs\.|unpkg\.|esm\.sh|fonts\.g|www\.googletagmanager)" web/*/index.html web/viewer/*.js; then
+if grep -nE "https://(cdn\.|cdnjs\.|unpkg\.|esm\.sh|fonts\.g|www\.googletagmanager)" web/*/index.html web/viewer/*.js web/recompose/script.js; then
   echo "↑ 還有外部資源沒處理" >&2; exit 1
 fi
 echo "OK"

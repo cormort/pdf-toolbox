@@ -5,7 +5,7 @@
 | 分頁 | 來源 | 說明 |
 |---|---|---|
 | 閱讀與註解 | [pdfviewer_v2](https://github.com/cormort/pdfviewer_v2) | 靜態網站 |
-| 頁面整理 | 本 repo（`web/organize/`） | 瀏覽器端 pdf-lib + pdf.js：合併、分割、刪除、旋轉、排序、擷取，合併時每個原始檔加書籤 |
+| 頁面重組 | [pdf_recompose](https://github.com/cormort/pdf_recompose) | 靜態網站：合併、拆分、排序、旋轉、目次頁與書籤、頁碼／頁首頁尾、浮水印、一頁多張／騎馬釘、裁白邊 |
 | 資料列分頁調整 | [pdf-row-shifter](https://github.com/cormort/pdf-row-shifter) | 單一 HTML |
 | 對開表排版 | [xls2spread](https://github.com/cormort/xls2spread) | 單一 HTML |
 | PDF 比對 | [diffpdf-web](https://github.com/cormort/diffpdf-web) | 單一 HTML |
@@ -66,8 +66,8 @@ CMYK 預檢（原 Python 版的項目已全部移植）：
 - [ ] DOCX 輸入（要帶 LibreOffice，先請使用者從 Word 存 PDF）
 
 其他（功能擴充，依建議順序）：
-- [x] 頁面整理
-- [ ] 壓縮 PDF（gs）、浮水印／頁碼（pdfcpu）、加密／移除密碼（pdfcpu）、PDF 轉圖片（gs）
+- [x] 頁面整理、浮水印、頁碼：由 pdf_recompose 提供
+- [ ] 壓縮 PDF（gs）、加密／移除密碼（pdfcpu）、PDF 轉圖片（gs）
 - [ ] Word／Excel／PPT 轉 PDF（呼叫本機 Office）、網頁轉 PDF（Edge headless）
 - [ ] OCR（可攜 Tesseract + 繁中語言檔）、密文遮蔽（整頁點陣化）
 - [ ] 工具間傳檔（例如比對結果送 CMYK），有需要再做

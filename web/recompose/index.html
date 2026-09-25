@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 頁面重組工具 (專業目錄版)</title>
+    
+    <script src="./pdf.min.js"></script>
+
+    <script src="./pdf-lib.min.js"></script>
+    <script src="./fontkit.umd.min.js"></script>
+    <script src="./sortable.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+
+    <style>
+        /* --- 通知區域 --- */
+        #notification {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            padding: 12px;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 500;
+            font-size: 13px;
+            box-shadow: 0 8px 20px rgba(0,0,0,.18);
+            text-align: center;
+            z-index: 2000;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none; /* 讓它可以被點穿 */
+        }
+        #notification.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        #notification.error {
+            background-color: var(--danger);
+        }
+        #notification.success {
+            background-color: var(--success);
+        }
+        #notification.info {
+            background-color: var(--primary);
+        }
+
+        /* --- 旋轉按鈕 --- */
+        .btn-rotate {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            padding: 4px;
+        }
+        .btn-rotate:hover {
+            opacity: 1;
+        }
+        .selected-page-item .page-actions {
+            display: flex; /* 讓旋轉和刪除按鈕並排 */
+            align-items: center;
+        }
+
+        /* --- 預覽 Modal --- */
+        .modal-content.large {
+            width: 90vw;
+            height: 90vh;
+            max-width: 1200px;
+        }
+        .preview-container {
+            flex-grow: 1; /* 佔滿剩餘空間 */
+            background: var(--default-100);
+            margin-bottom: 12px;
+            overflow: hidden;
+            border-radius: 12px;
+            border: 1px solid var(--default-200);
+        }
+        #previewFrame {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <button type="button" class="sidebar-collapse-btn" onclick="try { localStorage.setItem('sidebarCollapsed', document.body.classList.toggle('sidebar-collapsed') ? '1' : '') } catch (e) {}" title="收合／展開側邊欄" aria-label="收合／展開側邊欄">☰</button>
+    <script>try { if (localStorage.getItem('sidebarCollapsed')) document.body.classList.add('sidebar-collapsed') } catch (e) {}</script>
+    <div class="sidebar">
+        <h2>📄 PDF 頁面重組工具</h2>
+
+        <div id="notification" role="status" aria-live="polite"></div>
+        
+        <div class="upload-area" id="uploadArea">
+            <p>📁 拖曳 PDF 檔案到這裡</p>
+            <p class="upload-or">或</p>
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                選擇檔案
+            </button>
+            <input type="file" id="fileInput" accept="application/pdf" multiple aria-label="選擇要重組的 PDF 檔案（可多選）">
+        </div>
+
+        <div>
+            <h2>已載入檔案</h2>
+            <ul class="file-list" id="fileList"></ul>
+            <button class="btn btn-warning" id="clearFilesBtn" onclick="clearAllFiles()" style="margin-top: 10px;">
+                🗑️ 清除所有檔案
+            </button>
+        </div>
+
+        <div class="progress" id="progress" role="status" aria-live="polite">
+            <div>正在生成 PDF...</div>
+        </div>
+
+        <div class="note">
+            💡 提示：生成的 PDF 會保留原始文字，可以正常搜尋和複製。目錄使用思源黑體以支援中文顯示。
+        </div>
+
+        <!-- 輸出設定：可整組收合（螢幕較矮時才看得到上傳區與生成按鈕） -->
+        <button type="button" class="settings-toggle" id="settingsToggle" aria-expanded="true" aria-controls="sidebarActions">
+            <span class="settings-toggle-icon" aria-hidden="true">⚙️</span>
+            <span class="settings-toggle-text">收合輸出設定</span>
+            <span class="settings-toggle-chevron" aria-hidden="true">▾</span>
+        </button>
+
+        <!-- 動作區固定於側邊欄底部，捲動時永遠可見 -->
+        <div class="sidebar-actions" id="sidebarActions">
+            <div class="option-card">
+                <label>
+                    <input type="checkbox" id="addMarksCheckbox">
+                    <span>#️⃣ 頁面標記（頁首／頁尾／頁碼）</span>
+                </label>
+                <p class="option-hint">可用變數：<code>{n}</code> 頁碼、<code>{total}</code> 總頁數（含目錄頁）、<code>{name}</code> 檔名、<code>{date}</code> 日期。</p>
+
+                <div id="marksSettingsPanel" class="toc-settings" style="display: none;">
+                    <div class="toc-settings-title">⚙️ 標記設定</div>
+
+                    <div class="toc-settings-grid">
+                        <div class="toc-field toc-field-full">
+                            <label>快速套用（頁碼）</label>
+                            <div class="toc-input-row">
+                                <button type="button" class="toc-reset-btn toc-preset-btn" onclick="applyPageNumberPreset('plain')" title="只印頁碼數字">純數字</button>
+                                <button type="button" class="toc-reset-btn toc-preset-btn" onclick="applyPageNumberPreset('chinese')" title="第 {n} 頁 / 共 {total} 頁">第N頁</button>
+                                <button type="button" class="toc-reset-btn toc-preset-btn" onclick="applyPageNumberPreset('slash')" title="{n} / {total}">N/M</button>
+                                <button type="button" class="toc-reset-btn toc-preset-btn" onclick="applyPageNumberPreset('paren')" title="- {n} -">-N-</button>
+                            </div>
+                        </div>
+
+                        <div class="toc-field toc-field-full">
+                            <label>頁首</label>
+                            <div class="toc-input-row">
+                                <input type="text" id="headerFormat" class="toc-input toc-input-wide" placeholder="留空＝不印（例：{name}）" maxlength="60">
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>頁首位置</label>
+                            <div class="toc-input-row">
+                                <select id="headerPosition" class="toc-input">
+                                    <option value="top-center">正上</option>
+                                    <option value="top-left">左上</option>
+                                    <option value="top-right">右上</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field toc-field-full">
+                            <label>頁尾</label>
+                            <div class="toc-input-row">
+                                <input type="text" id="footerFormat" class="toc-input toc-input-wide" placeholder="留空＝不印（例：{date}）" maxlength="60">
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>頁尾位置</label>
+                            <div class="toc-input-row">
+                                <select id="footerPosition" class="toc-input">
+                                    <option value="bottom-center">正下</option>
+                                    <option value="bottom-left">左下</option>
+                                    <option value="bottom-right">右下</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field toc-field-full">
+                            <label>頁碼</label>
+                            <div class="toc-input-row">
+                                <input type="text" id="pageNumberFormat" class="toc-input toc-input-wide" value="第 {n} 頁 / 共 {total} 頁" maxlength="60">
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>頁碼位置</label>
+                            <div class="toc-input-row">
+                                <select id="pageNumberPosition" class="toc-input">
+                                    <option value="bottom-right">右下</option>
+                                    <option value="bottom-center">正下</option>
+                                    <option value="bottom-left">左下</option>
+                                    <option value="top-right">右上</option>
+                                    <option value="top-center">正上</option>
+                                    <option value="top-left">左上</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>邊距（三者共用）</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="pageNumberMargin" class="toc-input" min="8" max="120" value="30">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>字級（三者共用）</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="pageNumberSize" class="toc-input" min="6" max="36" value="10">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="resetPageNumberSettings()" class="toc-reset-btn">
+                        🔄 重設為預設值
+                    </button>
+                </div>
+            </div>
+
+            <div class="option-card">
+                <label>
+                    <input type="checkbox" id="addBookmarksCheckbox">
+                    <span>🔖 寫入書籤（閱讀器左側大綱）</span>
+                </label>
+                <p class="option-hint">把右側成品的目錄寫成 PDF 原生書籤，在 Acrobat／瀏覽器裡可以直接跳章節。</p>
+            </div>
+
+            <div class="option-card">
+                <label>
+                    <input type="checkbox" id="addWatermarkCheckbox">
+                    <span>💧 浮水印／印章</span>
+                </label>
+                <p class="option-hint">在成品頁面上疊字（例如「機密」「副本」），可置中或平鋪。</p>
+
+                <div id="watermarkSettingsPanel" class="toc-settings" style="display: none;">
+                    <div class="toc-settings-title">⚙️ 浮水印設定</div>
+
+                    <div class="toc-settings-grid">
+                        <div class="toc-field toc-field-full">
+                            <label>文字（留空則不蓋）</label>
+                            <div class="toc-input-row">
+                                <input type="text" id="watermarkText" class="toc-input toc-input-wide" value="機密" maxlength="40">
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>樣式</label>
+                            <div class="toc-input-row">
+                                <select id="watermarkLayout" class="toc-input">
+                                    <option value="center">置中（單一）</option>
+                                    <option value="tile">平鋪（佈滿頁面）</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>顏色</label>
+                            <div class="toc-input-row">
+                                <select id="watermarkColor" class="toc-input">
+                                    <option value="red">紅</option>
+                                    <option value="gray">灰</option>
+                                    <option value="blue">藍</option>
+                                    <option value="black">黑</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>字級</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="watermarkSize" class="toc-input" min="8" max="200" value="40">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>透明度</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="watermarkOpacity" class="toc-input" min="5" max="100" value="18">
+                                <span class="toc-unit">%</span>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>旋轉角度</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="watermarkAngle" class="toc-input" min="-90" max="90" value="45">
+                                <span class="toc-unit">度</span>
+                            </div>
+                        </div>
+
+                        <div class="toc-field toc-field-full">
+                            <label>頁面範圍</label>
+                            <div class="toc-input-row">
+                                <input type="text" id="watermarkRange" class="toc-input toc-input-wide" placeholder="全部（例：1-3,5）">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="resetWatermarkSettings()" class="toc-reset-btn">
+                        🔄 重設為預設值
+                    </button>
+                </div>
+            </div>
+
+            <div class="option-card">
+                <label>
+                    <input type="checkbox" id="enableSplitCheckbox">
+                    <span>✂️ 依小節拆成多檔</span>
+                </label>
+                <p class="option-hint">每個小節各輸出一個 PDF；沒有小節時每頁一個檔。下載時會打包成一個 ZIP。</p>
+
+                <div id="splitSettingsPanel" class="toc-settings" style="display: none;">
+                    <div class="toc-settings-title">⚙️ 拆檔設定</div>
+
+                    <div class="toc-settings-grid">
+                        <div class="toc-field toc-full">
+                            <label>檔名格式</label>
+                            <div class="toc-input-row">
+                                <input type="text" id="splitNameFormat" class="toc-input toc-input-wide" value="{title}" maxlength="60">
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>編號位數</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="splitPadWidth" class="toc-input" min="1" max="4" value="2">
+                                <span class="toc-unit">位</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="option-hint">可用變數：<code>{n}</code> 編號、<code>{title}</code> 小節標題、<code>{total}</code> 總檔數、<code>{date}</code> 日期。
+                    標題含 <code>/ \ : * ? " &lt; &gt; |</code> 等字元會自動替換。</p>
+
+                    <button onclick="resetSplitSettings()" class="toc-reset-btn">
+                        🔄 重設為預設值
+                    </button>
+                </div>
+            </div>
+
+            <div class="option-card">
+                <label>
+                    <input type="checkbox" id="enableImpositionCheckbox">
+                    <span>🖨️ 一頁多張／騎馬釘</span>
+                </label>
+                <p class="option-hint">列印用拼版：把多頁併到一張紙上。騎馬釘會自動重排頁序，對折後頁碼連續。</p>
+
+                <div id="impositionSettingsPanel" class="toc-settings" style="display: none;">
+                    <div class="toc-settings-title">⚙️ 拼版設定</div>
+
+                    <div class="toc-settings-grid">
+                        <div class="toc-field">
+                            <label>每張頁數</label>
+                            <div class="toc-input-row">
+                                <select id="impositionNUpSelect" class="toc-input">
+                                    <option value="1">1（不拼版）</option>
+                                    <option value="2">2（2-up）</option>
+                                    <option value="4">4（4-up）</option>
+                                    <option value="6">6（6-up）</option>
+                                    <option value="9">9（9-up）</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>紙張尺寸</label>
+                            <div class="toc-input-row">
+                                <select id="impositionSheetSizeSelect" class="toc-input">
+                                    <option value="original">沿用頁面尺寸</option>
+                                    <option value="a4">A4</option>
+                                    <option value="a5">A5</option>
+                                    <option value="letter">Letter</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field toc-field-full">
+                            <label>排列方向</label>
+                            <div class="toc-input-row">
+                                <select id="impositionOrderSelect" class="toc-input">
+                                    <option value="row">先左而右，再換列</option>
+                                    <option value="column">先上而下，再換欄</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field toc-field-full">
+                            <label>騎馬釘</label>
+                            <div class="toc-input-row">
+                                <label class="toc-inline-check">
+                                    <input type="checkbox" id="impositionSaddleCheckbox">
+                                    <span>依對折順序重排（頁數自動補成 4 的倍數；勾選後每面固定 2 頁，忽略上方的每張頁數）</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>格線</label>
+                            <div class="toc-input-row">
+                                <label class="toc-inline-check">
+                                    <input type="checkbox" id="impositionBorderCheckbox">
+                                    <span>畫格線</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="resetImpositionSettings()" class="toc-reset-btn">
+                        🔄 重設為預設值
+                    </button>
+                </div>
+            </div>
+
+            <div class="option-card">
+                <label>
+                    <input type="checkbox" id="enableLayoutCheckbox">
+                    <span>📐 版面調整（裁白邊／統一尺寸）</span>
+                </label>
+                <p class="option-hint">只改頁面框與尺寸，不動內容 —— 文字、搜尋與書籤連結都不受影響。</p>
+
+                <div id="layoutSettingsPanel" class="toc-settings" style="display: none;">
+                    <div class="toc-settings-title">⚙️ 版面設定</div>
+
+                    <div class="toc-settings-grid">
+                        <div class="toc-field toc-field-full">
+                            <label>裁切方式</label>
+                            <div class="toc-input-row">
+                                <select id="layoutFitSelect" class="toc-input">
+                                    <option value="original">維持原頁面範圍</option>
+                                    <option value="content">裁掉多餘白邊（自動偵測內容）</option>
+                                    <option value="inset">四邊平均內縮</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>留白／內縮</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="layoutMarginInput" class="toc-input" min="0" max="200" value="10">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+
+                        <div class="toc-field">
+                            <label>統一頁面尺寸</label>
+                            <div class="toc-input-row">
+                                <select id="uniformSizeSelect" class="toc-input">
+                                    <option value="original">不統一</option>
+                                    <option value="a4">A4</option>
+                                    <option value="a5">A5</option>
+                                    <option value="b5">B5</option>
+                                    <option value="letter">Letter</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="resetLayoutSettings()" class="toc-reset-btn">
+                        🔄 重設為預設值
+                    </button>
+                </div>
+            </div>
+
+            <div class="option-card keep-visible">
+                <label>
+                    <input type="checkbox" id="addTocCheckbox">
+                    <span>📑 新增目錄頁</span>
+                </label>
+
+                <div id="tocSettingsPanel" class="toc-settings" style="display: none;">
+                    <div class="toc-settings-title">⚙️ 目錄字型設定</div>
+                    
+                    <div class="toc-settings-grid">
+                        <div class="toc-field">
+                            <label>「目錄」標題大小</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="tocMainTitleSize" min="12" max="32" value="20" class="toc-input">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+                        
+                        <div class="toc-field">
+                            <label>分隔線標題大小</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="tocSectionSize" min="10" max="24" value="14" class="toc-input">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+                        
+                        <div class="toc-field">
+                            <label>項目標題大小</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="tocItemTitleSize" min="8" max="20" value="12" class="toc-input">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+                        
+                        <div class="toc-field">
+                            <label>頁碼大小</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="tocPageNumSize" min="8" max="20" value="12" class="toc-input">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+                        
+                        <div class="toc-field toc-field-full">
+                            <label>行距</label>
+                            <div class="toc-input-row">
+                                <input type="number" id="tocLineHeight" min="15" max="40" value="20" class="toc-input">
+                                <span class="toc-unit">pt</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button onclick="resetTocSettings()" class="toc-reset-btn">
+                        🔄 重設為預設值
+                    </button>
+                </div>
+            </div>
+
+            <button class="btn btn-success" id="generateBtn" onclick="generatePDF()">
+                生成新的 PDF
+            </button>
+        </div>
+        
+    </div>
+
+    <div class="main-content">
+        <div class="source-panel" id="sourcePanel">
+            <div class="panel-title">
+                <span>📑 原始 PDF 頁面</span>
+                <div class="panel-controls">
+                    <div class="toggle-group">
+                        <button id="listViewBtn" class="active" onclick="setViewMode('list')">清單</button>
+                        <button id="gridViewBtn" onclick="setViewMode('grid')">縮圖</button>                        
+                    </div>
+                    <div class="toggle-group" id="size-toggle">
+                        <button data-size="small" onclick="setThumbnailSize('small')">小</button>
+                        <button data-size="medium" onclick="setThumbnailSize('medium')">中</button>
+                        <button data-size="large" onclick="setThumbnailSize('large')">大</button>
+                        <button data-size="xlarge" onclick="setThumbnailSize('xlarge')">超大</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="quick-select-toolbar">
+                <span class="qs-label">⚡ 智慧勾選：</span>
+                <select id="qsFileSelect" class="qs-select">
+                    <option value="-1">-- 請先載入檔案 --</option>
+                </select>
+                <select id="qsTypeSelect" class="qs-select">
+                    <option value="all">全部頁面</option>
+                    <option value="odd">奇數頁 (1, 3, 5...)</option>
+                    <option value="even">偶數頁 (2, 4, 6...)</option>
+                    <option value="first">第一頁</option>
+                    <option value="last">最後一頁</option>
+                    <option value="blank">空白頁 (無文字)</option>
+                </select>
+                <button class="btn-qs-action" onclick="applyQuickSelection()">
+                    ✅ 執行勾選
+                </button>
+            </div>
+
+            <div class="batch-toolbar">
+                <div class="batch-select-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="selectAllSource" onchange="toggleSelectAllSource(this)"> 全選
+                    </label>
+                    <span id="selectedCountInfo" style="font-size: 12px; color: var(--default-500); margin-left: 8px;">(已勾選 0 頁)</span>
+                    <a href="#" onclick="clearAllSourceChecks(); return false;" style="font-size: 12px; margin-left: 10px; color: var(--danger);">[取消全選]</a>
+                </div>
+                
+                <div class="batch-btn-group">
+                    <button class="btn-batch btn-rotate-left" onclick="batchRotateSource(-90)" title="逆時針旋轉">↺ 左轉</button>
+                    <button class="btn-batch btn-rotate-right" onclick="batchRotateSource(90)" title="順時針旋轉">↻ 右轉</button>
+                    <button class="btn-batch btn-add" onclick="batchAddToTarget()">➕ 加入右側</button>
+                    <button class="btn-batch btn-delete" onclick="batchDeleteFromSource()">🗑️ 刪除</button>
+                </div>
+            </div>
+
+            <div id="sourcePages"></div>
+        </div>
+
+        <div class="panel-resizer" id="panelResizer" title="拖曳調整左右面板寬度"></div>
+
+        <div class="target-panel" id="targetPanel">
+            <div class="panel-title">
+                <span>📋 已選擇的頁面 (成品)</span>
+                
+                <div class="panel-controls">
+                    <div class="toggle-group">
+                        <button id="targetListViewBtn" onclick="setTargetViewMode('list')">清單</button>
+                        <button id="targetGridViewBtn" class="active" onclick="setTargetViewMode('grid')">縮圖</button>                        
+                    </div>
+                    <div class="toggle-group" id="target-size-toggle">
+                        <button data-size="small" onclick="setTargetThumbnailSize('small')">小</button>
+                        <button data-size="medium" onclick="setTargetThumbnailSize('medium')">中</button>
+                        <button data-size="large" onclick="setTargetThumbnailSize('large')">大</button>
+                        <button data-size="xlarge" onclick="setTargetThumbnailSize('xlarge')">超大</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="quick-select-toolbar">
+                <span class="qs-label">⚡ 智慧勾選：</span>
+                <select id="qsTargetTypeSelect" class="qs-select">
+                    <option value="all">全部頁面</option>
+                    <option value="odd">奇數排序 (第 1, 3, 5...張)</option>
+                    <option value="even">偶數排序 (第 2, 4, 6...張)</option>
+                    <option value="first">第一張</option>
+                    <option value="last">最後一張</option>
+                    <option value="blank">空白頁 (無文字)</option>
+                </select>
+                <button class="btn-qs-action" onclick="applyTargetQuickSelection()">
+                    ✅ 執行勾選
+                </button>
+            </div>
+
+            <div class="batch-toolbar">
+                <div class="batch-select-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="selectAllTarget" onchange="toggleSelectAllTarget(this)"> 全選
+                    </label>
+                    <span id="targetSelectedCountInfo" style="font-size: 12px; color: var(--default-500); margin-left: 8px;">(0)</span>
+                </div>
+                
+                <div class="batch-btn-row">
+                    <div class="batch-btn-group">
+                        <button class="btn-batch btn-rotate-left" onclick="batchRotateTarget(-90)" title="逆時針旋轉">↺ 左轉</button>
+                        <button class="btn-batch btn-rotate-right" onclick="batchRotateTarget(90)" title="順時針旋轉">↻ 右轉</button>
+                        <button class="btn-batch btn-delete" onclick="batchDeleteFromTarget()">🗑️ 刪除</button>
+                    </div>
+
+                    <div class="toolbar-separator"></div>
+
+                    <div class="batch-btn-group">
+                        <button class="btn-panel-action btn-history" id="undoBtn" onclick="undo()" title="復原 (Ctrl+Z)" disabled>↶ 復原</button>
+                        <button class="btn-panel-action btn-history" id="redoBtn" onclick="redo()" title="重做 (Ctrl+Shift+Z)" disabled>↷ 重做</button>
+                    </div>
+
+                    <div class="toolbar-separator"></div>
+
+                    <div class="batch-btn-group">
+                        <button class="btn-panel-action btn-add-section" onclick="addSectionDivider()">➕ 新增小節</button>
+                        <button class="btn-panel-action btn-add-section" onclick="insertBlankPage()" title="插在最後一個勾選的頁面之後；沒有勾選就加在最後">📄 插入空白頁</button>
+                        <button class="btn-panel-action btn-edit" onclick="openTocEditor()">✏️ 編輯目錄</button>
+                        <button class="btn-panel-action btn-clear" id="clearSelectedBtn" onclick="clearSelectedPages()">🗑️ 清空全部</button>
+                    </div>
+                </div>
+            </div>
+            <div class="selected-pages" id="selectedPages"></div>
+        </div>
+    </div>
+
+    <dialog class="modal-content" id="tocModal">
+        <h3>批次編輯目錄</h3>
+        <p class="modal-hint">請在下方編輯目錄，一行代表一頁。完成後請確保總行數與選擇的頁數相同。<br>
+        行首<strong>每 2 個空白代表縮一層</strong>（同時決定目錄頁縮排與書籤階層）。<br>
+        想讓某個小節改用不同編號（例如附錄用羅馬數字）時，在該行行首加上標記：
+        <code>[roman-lower]</code>、<code>[roman-upper]</code>、<code>[chinese]</code>、
+        <code>[alpha-lower]</code>、<code>[alpha-upper]</code>；同一小節內會沿用，編號在每個小節重新起算。</p>
+        <textarea id="tocTextarea"></textarea>
+        <div class="modal-actions">
+            <button class="btn btn-aux" id="prefillTocBtn" onclick="prefillTocFromSource()">🔖 帶入來源書籤</button>
+            <button class="btn" onclick="closeTocEditor()">取消</button>
+            <button class="btn btn-primary" onclick="saveToc()">儲存變更</button>
+        </div>
+    </dialog>
+
+    <dialog class="modal-content large" id="previewModal">
+        <h3>預覽 PDF</h3>
+        <div class="preview-container">
+            <iframe id="previewFrame" frameborder="0"></iframe>
+        </div>
+        <div class="modal-actions">
+            <button class="btn" onclick="closePreview()">取消</button>
+            <button class="btn btn-success" id="downloadBtn" onclick="downloadGeneratedPDF()">
+                下載 PDF
+            </button>
+        </div>
+    </dialog>
+
+    <!-- 通用輸入/確認對話框，取代 prompt()/confirm() -->
+    <dialog class="modal-content" id="askDialog">
+        <h3 id="askDialogTitle"></h3>
+        <input type="text" id="askDialogInput" class="ask-input">
+        <div class="modal-actions">
+            <button class="btn" id="askDialogCancel">取消</button>
+            <button class="btn btn-primary" id="askDialogOk">確定</button>
+        </div>
+    </dialog>
+
+    <script src="script.js"></script>
+</body>
+</html>
