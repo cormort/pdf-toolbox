@@ -40,6 +40,7 @@ PdfToolbox\
 ./sync.sh          # 工具有更新時：從 GitHub 拉四個工具到 web/，拿掉 gtag、CDN 換成 web/vendor/
 go run . -dev      # 開 http://127.0.0.1:17831（-dev：不開視窗、不自動結束）
 go test ./...      # 內容串流改寫＋端到端（需要 gs 在 PATH）
+./smoke.sh         # 對執行中的服務打一輪 API：守衛、各工具、錯誤訊息（需要 gs、python）
 ./build.sh         # 產出 dist/PdfToolbox/ 與 dist/PdfToolbox.zip（需要 go、7z、curl）
 ```
 
@@ -48,14 +49,21 @@ Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToo
 
 ## Windows 驗收清單（Mac 上測不到的部分）
 
-- [ ] 雙擊 exe 會開 Edge app 視窗；SmartScreen 警告時「其他資訊 → 仍要執行」
-- [ ] 五個分頁都能開 PDF／xlsx
-- [ ] CMYK：中文檔名、中文使用者名稱（暫存在 `%TEMP%`）都能轉；轉換時不會閃黑色主控台視窗
+打勾的項目已在 Windows 11 Pro（繁中）上以 v0.1.5–v0.1.8 驗過。
+
+- [x] 雙擊 exe 會開 Edge app 視窗；exe 放在含中文、空格、`&` 的路徑也可以
+- [ ] SmartScreen 警告時「其他資訊 → 仍要執行」（要用從 GitHub 下載、帶網路標記的 zip 測）
+- [x] `pdf-toolbox.log` 有寫入（v0.1.7 起；之前的版本是空檔）
+- [x] 能開 PDF 並正常運作：閱讀與註解、頁面重組、PDF 比對、壓縮 PDF、PDF 轉圖片、RGB → CMYK、密碼保護
+- [ ] 資料列分頁調整、對開表排版：用真的表格 PDF／xlsx 走完一次（目前只確認頁面載入）
+- [x] CMYK：中文檔名、`%TEMP%` 在中文路徑下都能轉，下載檔名正確
+- [ ] 轉換時不會閃黑色主控台視窗（程式有設 `CREATE_NO_WINDOW`，要用眼睛看）
 - [ ] 沒裝 VC++ 可轉散發套件的乾淨電腦也能轉 CMYK
-- [ ] 關掉視窗後，工作管理員裡的 PdfToolbox.exe 5 分鐘內消失
-- [ ] 執行中再雙擊 exe，只會多開一個視窗
-- [ ] 下載的檔案進「下載」資料夾，檔名正確
-- [ ] 頁面重組的目次、頁碼、浮水印中文用標楷體（`C:\Windows\Fonts\kaiu.ttf`）正常顯示；英文版 Windows 需先裝「繁體中文補充字型」
+- [x] 關掉視窗後，工作管理員裡的 PdfToolbox.exe 5 分鐘內消失
+- [x] 執行中再雙擊 exe，不會多一個 PdfToolbox.exe
+- [ ] 執行中再雙擊 exe，畫面上多開一個視窗
+- [ ] 下載的檔案進「下載」資料夾，檔名正確（在 Edge app 視窗裡按下載）
+- [x] 頁面重組的目次、頁碼、浮水印中文用標楷體（`C:\Windows\Fonts\kaiu.ttf`）嵌入並正常顯示；英文版 Windows 需先裝「繁體中文補充字型」
 
 ## 待辦
 
