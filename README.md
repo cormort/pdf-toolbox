@@ -53,10 +53,26 @@ go test ./...      # 內容串流改寫＋端到端（需要 gs 在 PATH）
 ./smoke.sh         # 對執行中的服務打一輪 API：守衛、各工具、錯誤訊息（需要 gs、python）
 ./build.sh         # 產出 dist/PdfToolbox/ 與 dist/PdfToolbox.zip（需要 go、7z、curl）
                    # 打包不會帶執行時產生的 profile/；PdfToolbox 視窗還開著時會直接停下來要你先關掉
+node hover-check.mjs  # 用 Edge 實際量 hover／focus 的樣式（需要 Node 18+ 與 Edge；改 CSS 時跑）
 ```
 
 Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToolbox\gs\bin` 加進 PATH。
 `sync.sh`／`build.sh` 用 Git Bash 跑（build 另需 7-Zip）。
+
+### 樣式改動怎麼驗（`hover-check.mjs`）
+
+`web/tool.css` 的通用規則、各頁規則與按鈕變體，是靠權重與先後順序決定誰贏。這種「平常看沒問題、
+滑過去才發現被蓋掉」的錯（例如已選取的按鈕被 hover 規則塗掉）看程式碼不保險，所以有一支檢查：
+
+```bash
+node hover-check.mjs     # 自己起靜態伺服器與 headless Edge，跑完收乾淨；全過 exit 0，有 ✗ exit 1
+EDGE=<msedge 路徑> node hover-check.mjs   # 找不到 Edge 時自己指定
+```
+
+它送**真的滑鼠與鍵盤事件**，再讀 computed style，比對的是頁面上的 CSS 變數（所以淺色／深色模式都適用）。
+檢查範圍：首頁分頁、密碼頁的分段控制、主要／次要／危險／停用四種按鈕的 hover、以及鍵盤 focus 的外框。
+會擋下來的例子：`node hover-check.mjs` 對 `.seg` 的 hover 規則跑一次就會出現
+「✗ 已按下 滑過要維持 --accent：rgb(58, 58, 61)」。
 
 ### 圖示
 
