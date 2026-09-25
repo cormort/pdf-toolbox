@@ -29,14 +29,15 @@ p.lead { color:var(--mute); margin:0 0 24px; }
 .field > span, .field > label { display:block; font-weight:600; margin-bottom:4px; }
 .field small { display:block; color:var(--mute); }
 .opts { display:flex; flex-wrap:wrap; gap:6px 20px; }
-input, select { accent-color:var(--accent); }
-input[type=text], input[type=password], select { font:inherit; width:100%; max-width:320px; padding:6px 10px; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--bg); color:var(--ink); }
-select { width:auto; }
+/* 元素的基本樣式包在 :where() 裡、權重歸零：各頁、外框與下面的變體直接覆蓋就好，不用跟它比權重 */
+:where(input, select) { accent-color:var(--accent); }
+:where(input[type=text], input[type=password], select) { font:inherit; width:100%; max-width:320px; padding:6px 10px; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--bg); color:var(--ink); }
+:where(select) { width:auto; }
 .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:20px 0; }
-button, a.btn { font:inherit; padding:9px 18px; border-radius:var(--r-md); border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; transition:background .15s, color .15s, border-color .15s; }
-button:hover:not(:disabled), a.btn:hover { background:var(--accent-hover); }
-button:focus-visible, a.btn:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-button:disabled { opacity:.4; cursor:default; }
+:where(button, a.btn) { font:inherit; padding:9px 18px; border-radius:var(--r-md); border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; transition:background .15s, color .15s, border-color .15s; }
+:where(button:hover:not(:disabled), a.btn:hover) { background:var(--accent-hover); }
+:where(button, a.btn, input, select):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+:where(button:disabled) { opacity:.4; cursor:default; }
 button.ghost, a.btn.ghost { background:var(--soft); color:var(--ink); border:1px solid var(--line); }
 button.ghost:hover:not(:disabled), a.btn.ghost:hover { background:var(--line); }
 button.danger { background:transparent; color:var(--warn); border:1px solid var(--warn); }
@@ -45,8 +46,8 @@ button.danger:hover:not(:disabled) { background:var(--warn); color:var(--bg); } 
 .panel:empty { display:none; }
 .seg { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
 .seg button { background:var(--soft); color:var(--ink); border:1px solid var(--line); }
-/* 要排除已選取的那顆：這條的權重比下面那條高，不排除的話滑過選取中的按鈕會把它變灰 */
-.seg button:not([aria-pressed=true]):hover:not(:disabled) { background:var(--line); }
+/* :not(:disabled) 包進 :where()，權重跟下面選取中那條一樣，選取中的按鈕滑過去不會變灰 */
+.seg button:hover:where(:not(:disabled)) { background:var(--line); }
 .seg button[aria-pressed=true] { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
 .warn { color:var(--warn); }
 [hidden] { display:none !important; }

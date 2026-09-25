@@ -21,7 +21,7 @@
   nav { display:flex; align-items:center; gap:4px; padding:6px 10px; background:var(--bar); border-bottom:1px solid var(--line); overflow-x:auto; }
   nav b { margin-right:10px; white-space:nowrap; }
   nav button { border:0; background:none; color:var(--mute); font:inherit; padding:6px 12px; border-radius:var(--r-sm); cursor:pointer; white-space:nowrap; }
-  nav button:not([aria-selected=true]):hover:not(:disabled) { color:var(--ink); background:var(--line); } /* 要蓋過 tool.css 的 button:hover */
+  nav button:hover { color:var(--ink); background:var(--line); }
   nav button[aria-selected=true] { background:var(--accent); color:var(--accent-ink); }
   nav a { margin-left:auto; color:var(--mute); text-decoration:none; padding:6px 12px; border:1px solid var(--line); border-radius:var(--r-sm); white-space:nowrap; }
   nav a:hover { color:var(--ink); background:var(--line); }
