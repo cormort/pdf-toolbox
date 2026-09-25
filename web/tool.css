@@ -45,7 +45,8 @@ button.danger:hover:not(:disabled) { background:var(--warn); color:var(--bg); } 
 .panel:empty { display:none; }
 .seg { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
 .seg button { background:var(--soft); color:var(--ink); border:1px solid var(--line); }
-.seg button:hover:not(:disabled) { background:var(--line); }
+/* 要排除已選取的那顆：這條的權重比下面那條高，不排除的話滑過選取中的按鈕會把它變灰 */
+.seg button:not([aria-pressed=true]):hover:not(:disabled) { background:var(--line); }
 .seg button[aria-pressed=true] { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
 .warn { color:var(--warn); }
 [hidden] { display:none !important; }
