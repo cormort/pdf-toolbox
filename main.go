@@ -42,7 +42,8 @@ func main() {
 
 	// GUI 程式沒有主控台，訊息寫到 exe 旁邊的 log
 	if f, err := os.Create(filepath.Join(exeDir, "pdf-toolbox.log")); err == nil {
-		log.SetOutput(io.MultiWriter(os.Stderr, f))
+		// 檔案要放第一個：windowsgui 沒有 stderr，寫入會失敗，MultiWriter 遇錯就不再寫後面的
+		log.SetOutput(io.MultiWriter(f, os.Stderr))
 	}
 
 	ln, err := net.Listen("tcp", addr)
