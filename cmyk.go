@@ -149,8 +149,12 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 		"-dOverrideICC=true", "-dRenderIntent=1", // 以承印廠指定的 ICC 為準
 		"-sDefaultRGBProfile="+slash(filepath.Join(iccDir, "sRGB_IEC61966-2-1_no_black_scaling.icc")),
 		"-sOutputICCProfile="+slash(filepath.Join(iccDir, "JapanColor2011Coated.icc")),
-		"-sOutputFile="+slash(out), slash(src)); err != nil || !fileExists(out) {
+		"-sOutputFile="+slash(out), slash(src)); err != nil {
 		add("❌ Ghostscript 轉換失敗：%v", err)
+		return
+	}
+	if !fileExists(out) {
+		add("❌ Ghostscript 沒有產出檔案。")
 		return
 	}
 	restoreToUnicode(src, out) // gs 會丟掉部分中文字型的文字對應，補回來才搜尋得到

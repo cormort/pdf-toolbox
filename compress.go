@@ -45,8 +45,12 @@ func handleCompress(w http.ResponseWriter, r *http.Request) {
 		"-dPDFSETTINGS="+preset,
 		"-sColorConversionStrategy=LeaveColorUnchanged", // /screen、/ebook 預設會轉成 sRGB，印刷檔不能這樣改
 		"-dDetectDuplicateImages=true",
-		"-sOutputFile="+slash(out), slash(in)); err != nil || !fileExists(out) {
+		"-sOutputFile="+slash(out), slash(in)); err != nil {
 		res.Message = fmt.Sprintf("❌ Ghostscript 壓縮失敗：%v", err)
+		return
+	}
+	if !fileExists(out) {
+		res.Message = "❌ Ghostscript 沒有產出檔案。"
 		return
 	}
 	res.Restored, _ = restoreToUnicode(in, out) // 補不回來也不影響畫面，文字比對會提醒
