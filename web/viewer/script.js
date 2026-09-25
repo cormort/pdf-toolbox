@@ -2273,12 +2273,6 @@ copyPageTextBtn?.addEventListener('click', async () => {
 // === Installable app ===
 // The whole viewer runs on the device already, so a service worker is all that
 // stands between this and working with no network at all.
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js')
-            .catch(err => console.warn('Service worker registration failed:', err));
-    });
-}
 
 // === Install prompt ===
 // Chrome/Edge would show their own install bar on arrival. preventDefault()
