@@ -22,10 +22,14 @@
   #file { display:none; }
   .field { margin:16px 0; }
   .field label { display:block; font-weight:600; margin-bottom:4px; }
+  .field label.chk { font-weight:400; }
   .field small { display:block; color:var(--mute); }
   input[type=password], input[type=text] { box-sizing:border-box; font:inherit; width:100%; max-width:320px; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
-  .perms { display:flex; flex-wrap:wrap; gap:6px 20px; }
+  .perms { display:block; }
+  .perm { display:flex; flex-wrap:wrap; gap:2px 14px; align-items:baseline; margin-bottom:6px; }
+  .perm b { flex:0 0 7.5em; font-weight:600; }
   .perms label { font-weight:400; display:inline; }
+  select { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
   .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:20px 0; }
   button, a.btn { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; }
   button:disabled { opacity:.4; cursor:default; }
@@ -40,7 +44,7 @@
 
   <div class="modes">
     <button id="mEnc" aria-pressed="true">加密</button>
-    <button id="mDec" aria-pressed="false">移除密碼</button>
+    <button id="mDec" aria-pressed="false">移除保護</button>
   </div>
 
   <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong></label>
@@ -60,20 +64,49 @@
     <div class="field" id="permBox">
       <label>允許的操作</label>
       <div class="perms">
-        <label><input type="checkbox" id="print" checked> 列印</label>
-        <label><input type="checkbox" id="copy"> 複製文字與圖片</label>
-        <label><input type="checkbox" id="edit"> 修改、插入或刪除頁面</label>
-        <label><input type="checkbox" id="annot"> 加註解、填寫表單</label>
+        <div class="perm"><b>列印</b>
+          <label><input type="radio" name="print" value="allow" checked> 允許</label>
+          <label><input type="radio" name="print" value="draft"> 只允許低解析度（草稿）</label>
+          <label><input type="radio" name="print" value="none"> 不允許</label>
+        </div>
+        <div class="perm"><b>複製文字與圖片</b>
+          <label><input type="radio" name="copy" value="allow" checked> 允許</label>
+          <label><input type="radio" name="copy" value="a11y"> 只允許無障礙工具讀取</label>
+          <label><input type="radio" name="copy" value="none"> 不允許</label>
+        </div>
+        <div class="perm"><b>修改</b>
+          <label><input type="radio" name="edit" value="allow" checked> 允許</label>
+          <label><input type="radio" name="edit" value="assemble"> 只允許組合頁面（插入、旋轉、刪除、書籤）</label>
+          <label><input type="radio" name="edit" value="none"> 不允許</label>
+        </div>
+        <div class="perm"><b>註解與表單</b>
+          <label><input type="radio" name="annot" value="allow" checked> 允許</label>
+          <label><input type="radio" name="annot" value="fill"> 只允許填表單與簽章</label>
+          <label><input type="radio" name="annot" value="none"> 不允許</label>
+        </div>
       </div>
       <small>權限限制靠閱讀軟體遵守，無法防止刻意破解；真正機密的內容請用開啟密碼。</small>
+    </div>
+    <div class="field">
+      <label for="aes">加密方式</label>
+      <select id="aes">
+        <option value="256" selected>AES-256（建議）</option>
+        <option value="128">AES-128（給較舊的閱讀軟體）</option>
+      </select>
+      <small>兩種都是加密的 PDF，只是金鑰長度不同；AES-128 相容性較好，安全性較低。</small>
     </div>
   </div>
 
   <div id="decForm" hidden>
     <div class="field">
-      <label for="password">權限密碼</label>
+      <label for="password" id="pwLabel">權限密碼</label>
       <input id="password" type="password" autocomplete="current-password">
-      <small>設定限制時用的密碼。若檔案只設了開啟密碼，就輸入開啟密碼。</small>
+      <small id="pwHint">設定限制時用的密碼。若檔案只設了開啟密碼，就輸入開啟密碼。</small>
+      <small id="pwHintOpen" hidden>檔案不需要密碼就留空。</small>
+    </div>
+    <div class="field">
+      <label class="chk"><input type="checkbox" id="openOnly"> 我沒有權限密碼，只用開啟密碼移除</label>
+      <small>勾選後不驗證權限密碼，改用開啟密碼（或留空）取得移除的權利。也就是說：任何「不需要密碼就打得開」的檔案，列印、複製等限制都會被解除，跟 Acrobat 的規矩不同。輸出一樣是完全沒有保護的 PDF。</small>
     </div>
   </div>
 
@@ -94,12 +127,19 @@ function setMode(m) {
   $('mDec').setAttribute('aria-pressed', m === 'decrypt');
   $('encForm').hidden = m !== 'encrypt';
   $('decForm').hidden = m !== 'decrypt';
-  $('go').textContent = m === 'encrypt' ? '加密' : '移除密碼';
+  $('go').textContent = m === 'encrypt' ? '加密' : '移除保護';
   $('dl').hidden = true;
   $('msg').textContent = '';
 }
 $('mEnc').onclick = () => setMode('encrypt');
 $('mDec').onclick = () => setMode('decrypt');
+// 勾了「只用開啟密碼」就把欄位改成開啟密碼，並講清楚這條路不驗證權限密碼
+$('openOnly').onchange = () => {
+  const on = $('openOnly').checked;
+  $('pwLabel').textContent = on ? '開啟密碼' : '權限密碼';
+  $('pwHint').hidden = on;
+  $('pwHintOpen').hidden = !on;
+};
 // 沒有權限密碼時，權限設定沒有意義（開得了檔就有全部權限）
 const syncPerms = () => $('permBox').style.opacity = $('ownerPW').value ? 1 : .5;
 $('ownerPW').oninput = syncPerms;
@@ -132,9 +172,11 @@ $('go').onclick = async () => {
     }
     body.append('userPW', $('userPW').value);
     body.append('ownerPW', $('ownerPW').value);
-    for (const p of ['print', 'copy', 'edit', 'annot']) body.append(p, $(p).checked ? '1' : '0');
+    body.append('aes', $('aes').value);
+    for (const p of ['print', 'copy', 'edit', 'annot']) body.append(p, document.querySelector(`[name=${p}]:checked`).value);
   } else {
     body.append('password', $('password').value);
+    body.append('openOnly', $('openOnly').checked ? '1' : '0');
   }
   $('go').disabled = true;
   $('msg').className = '';

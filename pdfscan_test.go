@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
@@ -307,7 +308,7 @@ func TestRestoreToUnicode(t *testing.T) {
 	}
 }
 
-// 密碼保護：加密後只有權限密碼能移除；只有權限密碼的檔案不輸入密碼也不能移除
+// 密碼保護：加密後預設只有權限密碼能移除；勾選 openOnly 才改用開啟密碼（含列印保護的檔案）
 func TestProtect(t *testing.T) {
 	workDir = t.TempDir()
 	post := func(path string, fields map[string]string) fileResult {
@@ -344,12 +345,80 @@ func TestProtect(t *testing.T) {
 			t.Errorf("用 %q 移除：%+v", pw, res)
 		}
 	}
-	ownerOnly := post("testdata/pdflib_cjk.pdf", map[string]string{"mode": "encrypt", "ownerPW": "o1"})
+	ownerOnly := post("testdata/pdflib_cjk.pdf", map[string]string{"mode": "encrypt", "ownerPW": "o1", "print": "0"})
 	if res := post(outOf(ownerOnly), map[string]string{"mode": "decrypt", "password": ""}); res.OK {
 		t.Error("只有權限密碼的檔案不應該不用密碼就移除")
 	}
+	if res := post(outOf(ownerOnly), map[string]string{"mode": "decrypt", "password": "o1"}); !res.OK || isEncrypted(outOf(res)) {
+		t.Errorf("列印保護的檔案應該能用權限密碼移除：%+v", res)
+	}
+
+	// 明確勾選「我沒有權限密碼」之後才改用開啟密碼；不勾就還是一律要權限密碼
+	if res := post(outOf(ownerOnly), map[string]string{"mode": "decrypt", "password": "", "openOnly": "1"}); !res.OK || isEncrypted(outOf(res)) {
+		t.Errorf("勾選後，只鎖列印的檔案留空就該解得開：%+v", res)
+	}
+	if res := post(outOf(enc), map[string]string{"mode": "decrypt", "password": "u1", "openOnly": "1"}); !res.OK || isEncrypted(outOf(res)) {
+		t.Errorf("勾選後應該能用開啟密碼移除：%+v", res)
+	}
+	if res := post(outOf(enc), map[string]string{"mode": "decrypt", "password": "wrong", "openOnly": "1"}); res.OK {
+		t.Error("勾選後給錯的開啟密碼不該成功")
+	}
+	if res := post(outOf(enc), map[string]string{"mode": "decrypt", "password": "u1"}); res.OK {
+		t.Error("沒勾選時用開啟密碼不該被接受")
+	}
 	if res := post(outOf(enc), map[string]string{"mode": "encrypt", "userPW": "x"}); res.OK {
 		t.Error("已加密的檔案不應再加密")
+	}
+
+	// 三態權限：只允許「低解析度列印／無障礙讀取／組合頁面／填表單」時，只會設對應的單一位元
+	draft := post("testdata/pdflib_cjk.pdf", map[string]string{"mode": "encrypt", "ownerPW": "o1",
+		"print": "draft", "copy": "a11y", "edit": "assemble", "annot": "fill"})
+	if !draft.OK {
+		t.Fatalf("三態權限加密失敗：%+v", draft)
+	}
+	ctx, err := readPDF(outOf(draft))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := model.PermissionFlags(ctx.E.P)
+	for _, c := range []struct {
+		name string
+		bit  model.PermissionFlags
+		want bool
+	}{
+		{"低解析度列印", model.PermissionPrintRev2, true},
+		{"高品質列印", model.PermissionPrintRev3, false},
+		{"無障礙讀取", model.PermissionExtractRev3, true},
+		{"複製文字與圖片", model.PermissionExtract, false},
+		{"組合頁面", model.PermissionAssembleRev3, true},
+		{"修改內容", model.PermissionModify, false},
+		{"填表單", model.PermissionFillRev3, true},
+		{"加註解", model.PermissionModAnnFillForm, false},
+	} {
+		if (got&c.bit != 0) != c.want {
+			t.Errorf("%s 位元不對（P=0x%04X）", c.name, int(got))
+		}
+	}
+
+	// 全部不允許：列印的兩個位元都不能留
+	none := post("testdata/pdflib_cjk.pdf", map[string]string{"mode": "encrypt", "ownerPW": "o1",
+		"print": "none", "copy": "none", "edit": "none", "annot": "none"})
+	if ctx, err := readPDF(outOf(none)); err != nil {
+		t.Fatal(err)
+	} else if ctx.E.P&int(model.PermissionPrintRev2|model.PermissionPrintRev3) != 0 {
+		t.Errorf("全部不允許時不該有列印位元（P=0x%04X）", ctx.E.P)
+	}
+
+	// 加密方式：AES-256 是 V5，AES-128 是 V4
+	for bits, wantV := range map[string]int{"256": 5, "128": 4} {
+		res := post("testdata/pdflib_cjk.pdf", map[string]string{"mode": "encrypt", "ownerPW": "o1", "aes": bits})
+		ctx, err := readPDF(outOf(res))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ctx.E.V != wantV {
+			t.Errorf("AES-%s 的 V=%d，想要 %d", bits, ctx.E.V, wantV)
+		}
 	}
 }
 

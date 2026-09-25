@@ -10,8 +10,12 @@
 | 對開表排版 | [xls2spread](https://github.com/cormort/xls2spread) | 單一 HTML |
 | PDF 比對 | [diffpdf-web](https://github.com/cormort/diffpdf-web) | 單一 HTML |
 | 壓縮 PDF | 本 repo（`compress.go`、`web/compress/`） | Go + Ghostscript |
-| 密碼保護 | 本 repo（`protect.go`、`web/protect/`） | Go + pdfcpu |
+| 密碼保護 | 本 repo（`protect.go`、`web/protect/`） | Go + pdfcpu：加密（AES-256／128）、權限三態、移除保護 |
 | PDF 轉圖片 | 本 repo（`images.go`、`web/images/`） | Go + Ghostscript |
+| 取出內嵌圖片 | 本 repo（`extract.go`、`web/extract/`） | Go + pdfcpu：拿原始嵌入的圖，不是整頁點陣化 |
+| 中繼資料 | 本 repo（`metadata.go`、`web/metadata/`） | Go + pdfcpu：讀出／修改／清除 Info 字典與 XMP |
+| PDF 轉文字 | 本 repo（`pdftext.go`、`web/text/`） | Go + Ghostscript `txtwrite`：保留版面，欄位會對齊 |
+| 頁面尺寸統一 | 本 repo（`resize.go`、`web/resize/`） | Go + Ghostscript `-dPDFFitPage` |
 | RGB → CMYK | 本 repo（Go 重寫 [PDF_RGB2CMYK](https://huggingface.co/spaces/cormort/PDF_RGB2CMYK) 的核心） | Go + Ghostscript |
 
 ## 架構
@@ -104,8 +108,24 @@ CMYK 預檢（原 Python 版的項目已全部移植）：
       已知：pdf_recompose 嵌入中文字型不子集化，每份輸出多一整個字型檔。pdf-lib 的 `subset: true` 會缺字，
       經 gs 重寫則中文無法搜尋，暫維持現況；可評估改用 `@cantoo/pdf-lib`
 - [x] 壓縮 PDF（gs，三種程度，色彩不變）：壓縮後在瀏覽器用 pdf.js 逐頁比對文字（NFC、不看順序），有字無法搜尋就警告並列出頁碼
-- [x] 加密／移除密碼（pdfcpu，AES-256）：開啟密碼、權限密碼與四項權限；移除保護比照 Acrobat 必須用權限密碼
+- [x] 加密／移除保護（pdfcpu，AES-256）：開啟密碼、權限密碼與四項權限；移除保護預設比照 Acrobat 要權限密碼，
+      沒有權限密碼時可以另外明確勾選「我沒有權限密碼，只用開啟密碼移除」改用開啟密碼
+      （只鎖列印、開檔本來就不用密碼的檔案，留空即可解除）
 - [x] PDF 轉圖片（gs）：PNG／JPG、72–600 dpi、頁碼範圍；多頁打包 ZIP，檔名帶實際頁碼
+
+第二批（照 iThome Day 27「PDF 安全技術：密碼移除與文字解構」、WCT「移除 PDF 文件的已知密碼」、
+IBM RPA「加密及解密 PDF 檔案」與 PDFsam 的功能清單補的）：
+- [x] 權限選項加細：列印（允許／只允許低解析度草稿／不允許）、複製（允許／只允許無障礙工具／不允許）、
+      修改（允許／只允許組合頁面／不允許）、註解表單（允許／只允許填表單與簽章／不允許），另有 AES-128／256
+- [x] 移除保護的 gs 後援：pdfcpu 解不開的檔案改用 gs 重寫（「列印成 PDF」那招的自動版）；
+      只在「我沒有權限密碼」那條路啟用，預設那條路不碰 gs，不然填開啟密碼也能移除保護
+- [x] 取出內嵌圖片（pdfcpu）：保留原始解析度（跟「PDF 轉圖片」的整頁點陣化互補），可選頁碼、多張打包 ZIP
+- [x] 中繼資料（pdfcpu）：讀出／修改／清除 Info 字典與 catalog、各頁的 XMP。清除後只會留下寫入工具自己的
+      Producer 與時間戳（任何 PDF 寫入器都會蓋）
+- [x] PDF 轉文字（gs `txtwrite`）：保留版面、欄位會對齊，可貼進 Excel；中文靠字型的 ToUnicode，
+      沒有文字層的掃描檔會老實說抽不到（要 OCR）
+- [x] 頁面尺寸統一（gs `-dPDFFitPage`）：A4／A3／A5／B5／Letter／Legal，直式或橫式，
+      內容等比縮放並置中（小頁面也會被放大）
 
 已知：Ghostscript 重寫 PDF 時，部分字型的文字對應會被丟掉或寫錯（畫面、列印正常，但無法搜尋）。61 份抽樣裡 12 份有此現象；
 pdf-lib 嵌入的 Identity-H 中文字型可把原檔的 ToUnicode 補回（`tounicode.go`，壓縮與 CMYK 都會做），其他情況只能靠壓縮頁的文字比對提醒。

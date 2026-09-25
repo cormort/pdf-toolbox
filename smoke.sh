@@ -43,7 +43,7 @@ check "下載路徑穿越 → 404" "$(curl -s -o /dev/null -w '%{http_code}' --p
 check "下載不存在的工作 → 404" "$(curl -s -o /dev/null -w '%{http_code}' $B/api/file/0123456789abcdef/x.pdf)" 404
 
 echo "── 靜態頁面"
-for p in / /viewer/ /recompose/ /row-shifter/ /xls2spread/ /diffpdf/ /compress/ /images/ /cmyk/ /protect/ /icons/favicon.ico; do
+for p in / /viewer/ /recompose/ /row-shifter/ /xls2spread/ /diffpdf/ /compress/ /images/ /extract/ /cmyk/ /protect/ /metadata/ /text/ /resize/ /icons/favicon.ico; do
   check "GET $p" "$(curl -s -o /dev/null -w '%{http_code}' $B$p)" 200
 done
 check "favicon 是圖檔" "$(curl -s -o /dev/null -w '%{content_type}' $B/icons/favicon.ico)" "image"
@@ -74,8 +74,42 @@ curl -s -o "$T/enc.pdf" "$B$(echo "$r" | field download)"
 check "加密檔沒密碼打不開" "$("$GS" -q -dNODISPLAY -dBATCH -dNOPAUSE "$T/enc.pdf" 2>&1)" "password"
 check "再加密一次被拒" "$(post protect -F "file=@$T/enc.pdf" -F mode=encrypt -F userPW=x)" "已經有密碼保護"
 check "用開啟密碼移除被拒" "$(post protect -F "file=@$T/enc.pdf" -F mode=decrypt -F password=open1)" "密碼不正確"
+check "明確勾選後可用開啟密碼移除" "$(post protect -F "file=@$T/enc.pdf" -F mode=decrypt -F password=open1 -F openOnly=1 | field ok)" True
 check "用權限密碼移除成功" "$(post protect -F "file=@$T/enc.pdf" -F mode=decrypt -F password=own2 | field ok)" True
 check "沒設密碼被拒" "$(post protect -F "file=@$T/a.pdf" -F mode=encrypt)" "至少設定一種密碼"
+check "只允許低解析度列印" "$(post protect -F "file=@$T/a.pdf" -F mode=encrypt -F ownerPW=o1 -F print=draft -F copy=a11y | field ok)" True
+check "AES-128 加密" "$(post protect -F "file=@$T/a.pdf" -F mode=encrypt -F ownerPW=o1 -F aes=128 | field ok)" True
+
+echo "── 取出內嵌圖片"
+# 畫一張 64x64 的點陣圖，gs 會把它嵌進 PDF，這樣才有內嵌圖片可以抽
+# （太小張，例如 4x4，gs 會把它併掉，pdfcpu 就找不到）
+data=$(printf 'FF8000%.0s' $(seq 4096))
+cat > "$T/img.ps" <<EOF
+%!PS
+/DeviceRGB setcolorspace
+<< /ImageType 1 /Width 64 /Height 64 /BitsPerComponent 8 /Decode [0 1 0 1 0 1] /ImageMatrix [64 0 0 64 0 0]
+   /DataSource <$data> >> image
+showpage
+EOF
+"$GS" -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile="$T/img.pdf" "$T/img.ps"
+check "取出的圖片是 PNG" "$(post extract-images -F "file=@$T/img.pdf" | field download)" ".png"
+check "沒有圖片時說清楚" "$(post extract-images -F "file=@$T/a.pdf")" "沒有找到內嵌的圖片"
+
+echo "── 中繼資料"
+r=$(post metadata -F "file=@$T/a.pdf" -F action=read)
+check "讀取中繼資料" "$(echo "$r" | field ok)" True
+check "讀到 Producer" "$(echo "$r" | python -c "import json,sys;print(json.load(sys.stdin)['fields']['Producer'])")" "Ghostscript"
+check "清除中繼資料" "$(post metadata -F "file=@$T/a.pdf" -F action=clear | field ok)" True
+
+echo "── PDF 轉文字"
+r=$(post text -F "file=@$T/a.pdf")
+check "轉文字成功" "$(echo "$r" | field ok)" True
+curl -s -o "$T/t.txt" "$B$(echo "$r" | field download)"
+check "文字內容正確" "$(cat "$T/t.txt")" "RGB black text"
+
+echo "── 頁面尺寸統一"
+check "統一成 A4" "$(post resize -F "file=@$T/a.pdf" -F paper=A4 | field ok)" True
+check "橫式" "$(post resize -F "file=@$T/a.pdf" -F paper=A4 -F landscape=1)" "A4 橫式"
 
 echo "── PDF 轉圖片"
 check "單頁 PNG" "$(post images -F "file=@$T/five.pdf" -F pages=3 | field download)" "_p003.png"

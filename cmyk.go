@@ -200,7 +200,26 @@ func receivePDF(w http.ResponseWriter, r *http.Request) (id, dir, in, name, msg 
 	if err := saveTo(in, file); err != nil {
 		return "", "", "", "", "❌ 無法儲存上傳檔：" + err.Error()
 	}
-	return id, dir, in, strings.TrimSuffix(hdr.Filename, filepath.Ext(hdr.Filename)), ""
+	return id, dir, in, safeName(strings.TrimSuffix(hdr.Filename, filepath.Ext(hdr.Filename))), ""
+}
+
+// safeName 把使用者給的檔名清成可以安全當檔名與 ZIP 項目名稱的字串。
+// 上傳檔名是使用者給的，直接拿去組路徑或 ZIP 項目名稱會有跳脫目錄的風險。
+func safeName(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			return '_'
+		}
+		if r < 0x20 || r == 0x7F {
+			return '_'
+		}
+		return r
+	}, s)
+	if s = strings.Trim(s, " ."); s == "" {
+		return "file"
+	}
+	return s
 }
 
 func handleFile(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +370,15 @@ func formatImages(imgs []imageUse) string {
 
 // formatPages 把頁碼整理成「1-3, 5, 8」，最多列 12 段。pages 需已排序。
 func formatPages(pages []int) string {
+	ranges := pageRanges(pages)
+	if len(ranges) > 12 {
+		return strings.Join(ranges[:12], ", ") + fmt.Sprintf(" 等，共 %d", len(pages))
+	}
+	return strings.Join(ranges, ", ")
+}
+
+// pageRanges 把排序好的頁碼壓成「1-3」「5」這種區段（pdfcpu 的頁碼選擇也用這個格式）
+func pageRanges(pages []int) []string {
 	var ranges []string
 	for i := 0; i < len(pages); {
 		j := i
@@ -364,10 +392,7 @@ func formatPages(pages []int) string {
 		}
 		i = j + 1
 	}
-	if len(ranges) > 12 {
-		return strings.Join(ranges[:12], ", ") + fmt.Sprintf(" 等，共 %d", len(pages))
-	}
-	return strings.Join(ranges, ", ")
+	return ranges
 }
 
 const ptPerMM = 72 / 25.4
