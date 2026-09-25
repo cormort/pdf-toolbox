@@ -27,6 +27,8 @@ PdfToolbox\
 - **為什麼要本機 HTTP**：ES module、Service Worker、pdf.js worker 在 `file://` 都會被擋。
 - **port 固定 17831**：localStorage 以 origin（含 port）區分，換 port 各工具設定會消失。
 - **生命週期**：首頁每 30 秒 ping，5 分鐘沒請求就自動結束；已在執行時再雙擊只會開視窗。
+- **暫存**：上傳檔與轉檔結果放在 `%TEMP%\pdf-toolbox-*`，程式結束時整個刪掉；同一場工作階段裡超過 60 分鐘
+  沒下載的結果也會先清掉（下載連結到那時候失效）。預檢的點陣資料直接從 gs 的標準輸出串流進來，不落地。
 - **安全**：只聽 127.0.0.1，拒絕 Host 不符（DNS rebinding）與跨站 POST。
 - **CMYK 不帶 Python**：單色黑前處理（R=G=B 的 RGB 改 DeviceGray → 轉出來只有 K）用 Go + pdfcpu 重寫，
   轉換本身是一行 Ghostscript，預檢的總墨量／四色黑改用 Go 讀 gs 的點陣輸出，

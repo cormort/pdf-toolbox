@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 )
 
@@ -51,9 +50,7 @@ func handleCompress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res.Restored, _ = restoreToUnicode(in, out) // 補不回來也不影響畫面，文字比對會提醒
-	si, _ := os.Stat(in)
-	so, _ := os.Stat(out)
-	res.InSize, res.OutSize = si.Size(), so.Size()
+	res.InSize, res.OutSize = fileSize(in), fileSize(out)
 	res.OK = true
 	if res.OutSize >= res.InSize {
 		res.Message = "原檔已經很精簡，壓縮後沒有變小，建議直接用原檔。"
