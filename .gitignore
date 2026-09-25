@@ -1,0 +1,5 @@
+/dist/
+/webroot/
+/profile/
+*.exe
+.DS_Store
