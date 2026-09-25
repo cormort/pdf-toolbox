@@ -1,0 +1,2884 @@
+/* =================== GLOBAL VARIABLES & THEMING =================== */
+:root {
+    /* Low-glare theme: muted teal on warm off-white */
+    --primary-color: #0E7C86;
+    --primary-hover: #0A5F67;
+    --primary-light: #35A2AB;
+    --accent-color: #f5a524;       /* warning-500 */
+    --danger-color: #f31260;       /* danger-500 — fills only, not behind text */
+    --danger-strong: #c20d4c;      /* darkened for white text: #f31260 is 4.1:1 */
+
+    --bg-primary: #fbfbf9;         /* content1, warm off-white (less glare) */
+    --bg-secondary: #f3f3f0;       /* content2 */
+    --bg-tertiary: #e6e6e1;        /* content3 */
+
+    --text-primary: #1f2427;       /* softened foreground */
+    --text-secondary: #71717a;     /* default-500 */
+    --text-tertiary: #6b7280;      /* darkened from default-400: #a1a1aa was 2.5:1 on --bg-primary */
+
+    --border-color: #e4e4e7;       /* default-200 */
+    --border-hover: #d4d4d8;       /* default-300 */
+
+    /* HeroUI elevation scale */
+    --shadow-sm: 0 0 5px 0 rgba(0,0,0,.02), 0 2px 10px 0 rgba(0,0,0,.06), 0 0 1px 0 rgba(0,0,0,.3);
+    --shadow-md: 0 0 15px 0 rgba(0,0,0,.03), 0 2px 30px 0 rgba(0,0,0,.08), 0 0 1px 0 rgba(0,0,0,.3);
+    --shadow-lg: 0 0 30px 0 rgba(0,0,0,.04), 0 30px 60px 0 rgba(0,0,0,.12), 0 0 1px 0 rgba(0,0,0,.3);
+    --shadow-xl: var(--shadow-lg);
+
+    /* HeroUI radius scale */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 14px;
+    --radius-xl: 22px;
+
+    --transition-fast: 150ms ease;
+    --transition-normal: 250ms ease;
+    --transition-slow: 350ms ease;
+
+    /* `transition: all` also animates layout properties, so every hover forced
+       the browser to watch width/height/top/left too. These are the properties
+       the interactive states actually change. */
+    --transition-ui: background-color 150ms ease, color 150ms ease, border-color 150ms ease,
+        box-shadow 150ms ease, transform 150ms ease, opacity 150ms ease, visibility 150ms ease;
+    --transition-ui-normal: background-color 250ms ease, color 250ms ease, border-color 250ms ease,
+        box-shadow 250ms ease, transform 250ms ease, opacity 250ms ease, visibility 250ms ease;
+    --transition-ui-200: background-color 200ms ease, color 200ms ease, border-color 200ms ease,
+        box-shadow 200ms ease, transform 200ms ease, opacity 200ms ease, visibility 200ms ease;
+
+    --glass-bg: rgba(251, 251, 249, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.5);
+
+    /* One generated-content chevron, kept as a data URI because CSS ::after
+       cannot reference the sprite. See #search-results-panel h3::after. */
+    --icon-chevron-up: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
+}
+
+/* =================== BASE LAYOUT =================== */
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;      /* fallback */
+    height: 100dvh;     /* excludes the mobile browser chrome */
+    overflow: hidden;
+    overscroll-behavior-y: contain;
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+#app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    position: relative;
+    background: var(--bg-secondary);
+}
+
+#main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+#pdf-container {
+    flex: 1 1 auto;
+    position: relative;
+    overflow: auto;
+    /* Four-value shorthand on purpose: a separate padding-bottom gets wiped by
+       any later `padding:` shorthand, and that is how the phone breakpoint
+       silently lost the room reserved for the floating controls. */
+    padding: 40px 40px 100px;
+    /* Reserve the scrollbar up front. Fit-to-width measures clientWidth, sizes
+       the page, and the taller page then summons a vertical scrollbar — which
+       shrinks clientWidth by the scrollbar width and leaves the page that much
+       too wide. Invisible where scrollbars overlay (phones), 10px on desktop. */
+    scrollbar-gutter: stable;
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+    min-width: 200px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+}
+
+/* Canvas Wrapper - Contains PDF and overlay layers */
+#canvas-wrapper {
+    position: relative;
+    display: inline-block;
+    box-shadow: var(--shadow-lg);
+    background: white;
+    border-radius: var(--radius-sm);
+}
+
+#pdf-canvas {
+    display: block;
+    background: white;
+}
+
+/* Text Layer - Transparent overlay for text selection */
+#text-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: hidden;
+    line-height: 1.0;
+    pointer-events: none;
+    z-index: 2;
+    /* pdf.js TextLayer sizes the container with round(down, …, var(--scale-round-*));
+       leave these undefined and the width declaration is invalid. */
+    --scale-round-x: 1px;
+    --scale-round-y: 1px;
+}
+
+/* pdf.js TextLayer emits <span role="presentation">, sometimes nested in
+   .markedContent wrappers — hence descendant, not child. */
+#text-layer span[role="presentation"] {
+    color: transparent;
+    position: absolute;
+    white-space: pre;
+    transform-origin: 0% 0%;
+    pointer-events: auto;
+    /* Selection is off until the 文字選取 button turns it on. It used to be
+       `text` here with nothing setting `none`, so the button did almost
+       nothing and a swipe to turn the page selected text instead. */
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* When text selection mode is active */
+#text-layer.text-selection-active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#text-layer.text-selection-active span[role="presentation"] {
+    color: transparent;
+    background: transparent;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+/* While selecting, the browser must not also treat the drag as a page swipe */
+#text-layer.text-selection-active {
+    touch-action: none;
+}
+
+#text-layer.text-selection-active span[role="presentation"]::selection {
+    background: rgba(0, 111, 238, 0.3);
+}
+
+/* Hide search result highlights when toggled */
+#text-layer.highlights-hidden .wavy-underline {
+    text-decoration: none !important;
+    border-bottom: none !important;
+    background-image: none !important;
+}
+
+/* Wavy Underline for search results */
+.wavy-underline {
+    text-decoration: underline wavy var(--danger-color);
+    text-underline-offset: 2px;
+}
+
+/* Drawing Canvas - For highlighter tool */
+#drawing-canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    z-index: 5;
+}
+
+#drawing-canvas.highlighter-active {
+    pointer-events: auto;
+    cursor: crosshair;
+}
+
+/* Notes Layer */
+#notes-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    z-index: 10;
+}
+
+#notes-layer.active {
+    pointer-events: auto;
+}
+
+#canvas-wrapper.notes-mode #notes-layer {
+    cursor: cell;
+}
+
+.note-marker {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    background: var(--accent-color);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    pointer-events: auto;
+    box-shadow: var(--shadow-md);
+    transition: var(--transition-ui);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+}
+
+.note-marker .icon {
+    width: 14px;
+    height: 14px;
+}
+
+.note-marker:hover {
+    transform: translate(-50%, -50%) scale(1.2);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+}
+
+/* Modal specific tweaks if needed */
+#note-modal {
+    z-index: 2000;
+}
+
+/* Magnifier Glass */
+#magnifier-glass {
+    position: absolute;
+    display: none;
+    border: 3px solid var(--primary-color);
+    border-radius: 12px;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 20;
+    box-shadow: var(--shadow-xl);
+}
+
+#magnifier-canvas {
+    display: block;
+}
+
+/* Empty State / Upload Guide */
+#empty-state-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+/* instructions.html was precached but had no way in from the UI */
+#help-link {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 2px;
+}
+
+#help-link:hover,
+#help-link:focus-visible {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.empty-state-guide {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    max-width: 400px;
+    margin-top: 10vh;
+    padding: 40px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    animation: fadeInScale 0.5s ease-out;
+}
+
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.empty-state-guide .icon {
+    font-size: 64px;
+    margin-bottom: 24px;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+.empty-state-guide h2 {
+    margin: 0 0 12px 0;
+    font-size: 1.5rem;
+    color: var(--text-primary);
+}
+
+.empty-state-guide p {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/* =================== ICONS =================== */
+/* Inline SVG referenced from #icon-sprite in index.html. Sized in em so the
+   existing font-size rules still control it, and coloured by currentColor so a
+   button's hover/active state themes its icon for free. */
+.icon {
+    width: 1em;
+    height: 1em;
+    display: inline-block;
+    vertical-align: -0.125em;
+    flex: none;
+}
+
+/* =================== TOOLBAR =================== */
+#toolbar {
+    padding: 12px 20px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 12px;
+    align-items: center;
+    flex-shrink: 0;
+    overflow: visible;
+    box-shadow: var(--shadow-md);
+    z-index: 100;
+}
+
+.title-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+.app-logo {
+    width: 36px;
+    height: 36px;
+    background: var(--primary-color);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 1.2rem;
+    box-shadow: var(--shadow-md);
+}
+
+.app-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.025em;
+    white-space: nowrap;
+}
+
+.file-section,
+.search-section,
+.nav-section,
+.file-switch-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* 工具列區塊收縮策略：僅 search 與 nav 允許縮小，其餘保持固定寬度避免按鈕被壓扁 */
+.file-section,
+.file-switch-section,
+.title-section {
+    flex-shrink: 0;
+}
+
+/* 桌面版自訂檔案上傳按鈕（替代原生 file input，節省 250px+ 工具列空間） */
+.custom-file-upload {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    min-height: 40px;
+    background: var(--bg-secondary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition-ui);
+    white-space: nowrap;
+}
+
+.custom-file-upload:hover {
+    background: var(--bg-tertiary);
+}
+
+.file-switch-section {
+    flex-shrink: 0;
+}
+
+#fileSwitchDropdown {
+    font-size: 0.875rem;
+    max-width: 200px;
+    background: var(--bg-secondary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-ui);
+}
+
+#fileSwitchDropdown:hover:not(:disabled) {
+    border-color: var(--primary-color);
+}
+
+#fileSwitchDropdown:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+#fileSwitchDropdown:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.search-section {
+    flex: 1;
+    max-width: 600px;
+    min-width: 0;
+}
+
+input[type="text"],
+input[type="number"],
+select {
+    padding: 0 12px;
+    min-height: 40px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    transition: var(--transition-ui);
+}
+
+input[type="text"]:hover,
+input[type="number"]:hover,
+select:hover {
+    background: var(--bg-tertiary);
+}
+
+input:focus,
+select:focus {
+    outline: none;
+    background: var(--bg-secondary);
+    border-color: var(--primary-color);
+}
+
+.search-section input,
+.search-section button,
+.search-section select {
+    flex-shrink: 0;
+}
+
+.search-input-wrap {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-shrink: 1;
+    min-width: 120px;
+}
+
+#searchInput {
+    flex: 1;
+    min-width: 0;
+    padding-right: 34px;
+}
+
+/* The button carries the `hidden` attribute while the box is empty, but the
+   generic `button { display: inline-flex }` outranks the UA's [hidden] rule, so
+   it used to stay visible as a dead control. Found while verifying the icon
+   swap; one line, no effect on the visible state. */
+#clear-search-btn[hidden] {
+    display: none;
+}
+
+#clear-search-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    min-height: 0;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    line-height: 1;
+    font-size: 18px;
+    border: none;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+button {
+    padding: 0 16px;
+    min-height: 40px;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    font-size: 0.875rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: var(--transition-ui);
+    border: 1px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+/* Everything else these need comes from the generic `button` rule above. */
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+    padding: 0 20px;
+}
+
+.btn-primary {
+    background: var(--primary-color);
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:hover {
+    opacity: .9;
+}
+
+.btn-secondary {
+    background: var(--bg-secondary);
+    border-color: transparent;
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+    background: var(--bg-tertiary);
+}
+
+.btn-danger {
+    background: var(--danger-strong);
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+}
+
+.btn-danger:hover {
+    opacity: .9;
+}
+
+/* =================== NAVIGATION CONTROLS =================== */
+.nav-section {
+    background: var(--bg-secondary);
+    padding: 4px 8px;
+    border-radius: var(--radius-lg);
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.nav-section button {
+    flex-shrink: 0;
+}
+
+#page-num-display {
+    font-weight: 600;
+    min-width: 60px;
+    max-width: 220px;
+    text-align: center;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+}
+
+#page-to-go {
+    width: 56px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+#go-to-page-btn {
+    flex-shrink: 0;
+}
+
+/* =================== RESIZER =================== */
+#resizer {
+    width: 4px;
+    background: var(--border-color);
+    cursor: col-resize;
+    flex-shrink: 0;
+    display: none;
+    transition: background var(--transition-fast);
+    position: relative;
+}
+
+#resizer:hover {
+    background: var(--primary-color);
+}
+
+/* Widen the grab area without widening the visual bar */
+#resizer::before {
+    content: '';
+    position: absolute;
+    left: -4px;
+    right: -4px;
+    top: 0;
+    bottom: 0;
+}
+
+#app-container.results-panel-visible #resizer {
+    display: block;
+}
+
+/* =================== PARAGRAPH SELECTION =================== */
+.paragraph-highlight {
+    position: absolute;
+    background-color: rgba(14, 124, 134, 0.15);
+    border: 2px solid var(--primary-color);
+    border-radius: var(--radius-sm);
+    z-index: 6;
+    pointer-events: none;
+    animation: fadeIn var(--transition-fast);
+}
+
+#copy-paragraph-btn {
+    position: absolute;
+    z-index: 7;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+#copy-paragraph-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-xl);
+}
+
+/* =================== MAGNIFIER ZOOM CONTROLS =================== */
+#local-magnifier-zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#local-magnifier-zoom-controls label {
+    white-space: nowrap;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+#local-magnifier-zoom-controls select {
+    padding: 8px 10px;
+}
+
+/* =================== SEARCH RESULTS PANEL =================== */
+#search-results-panel {
+    display: none;
+    flex: 0 0 360px;
+    min-width: 280px;
+    max-width: 70%;
+    background-color: var(--bg-primary);
+    border-left: 1px solid var(--border-color);
+    box-sizing: border-box;
+    box-shadow: var(--shadow-lg);
+}
+
+#app-container.results-panel-visible #search-results-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+.results-stepper {
+    display: none;
+}
+
+/* The collapse button belongs to the mobile sheet, which sits on top of the
+   document. The desktop panel is a column beside it and stays put. */
+#results-collapse-btn {
+    display: none;
+}
+
+#search-results-panel h3 {
+    margin: 0;
+    padding: 20px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background-color: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+#panel-dropdown-container {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+#panel-dropdown-container select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 0.938rem;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: var(--transition-ui);
+    cursor: pointer;
+}
+
+#panel-dropdown-container select:hover {
+    border-color: var(--primary-color);
+}
+
+#panel-dropdown-container select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: none;
+}
+
+#panelFileFilterDropdown {
+    margin-bottom: 8px;
+}
+
+#results-list {
+    padding: 16px;
+    flex-grow: 1;
+    overflow-y: auto;
+}
+
+/* Custom Scrollbar for Results List */
+#results-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+#results-list::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+#results-list::-webkit-scrollbar-thumb {
+    background: var(--border-hover);
+    border-radius: 4px;
+}
+
+#results-list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+}
+
+.result-item {
+    margin-bottom: 16px;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background-color: var(--bg-primary);
+    cursor: pointer;
+    transition: var(--transition-ui-normal);
+    position: relative;
+    overflow: hidden;
+}
+
+.result-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--primary-color);
+    transform: scaleY(0);
+    transition: transform var(--transition-normal);
+}
+
+.result-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.result-item:hover::before {
+    transform: scaleY(1);
+}
+
+.result-item .thumbnail-canvas {
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border-color);
+    margin-bottom: 10px;
+    background-color: var(--bg-tertiary);
+    min-height: 120px;
+    border-radius: var(--radius-md);
+    transition: transform var(--transition-normal);
+}
+
+.result-item:hover .thumbnail-canvas {
+    transform: scale(1.02);
+}
+
+.result-item .page-info {
+    font-weight: 600;
+    font-size: 0.875rem;
+    margin-bottom: 6px;
+    color: var(--primary-color);
+}
+
+.result-item .context-snippet {
+    font-size: 0.813rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    word-wrap: break-word;
+}
+
+.result-item .wavy-underline {
+    text-decoration-line: underline !important;
+    text-decoration-style: wavy !important;
+    text-decoration-color: var(--accent-color) !important;
+    background-color: rgba(245, 165, 36, 0.15);
+    border-radius: 3px;
+    padding: 1px 3px;
+}
+
+
+/* =================== FLOATING ACTION BUTTONS =================== */
+#floating-action-buttons {
+    position: fixed;
+    right: 24px;
+    bottom: 100px;
+    /* Raised higher to avoid covering bottom toolbar */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 1000;
+    transition: right var(--transition-normal);
+}
+
+/* When results panel is visible, move to the left of the 360px panel */
+body.results-bar-visible #floating-action-buttons {
+    right: 390px;
+}
+
+/* ponytail: 同 .page-nav-overlay 的淡出策略 — idle 讓出頁面，互動或選單展開時恢復。
+   淡出整組而不是逐顆按鈕：逐顆的話得先猜對位置才看得到那顆圖示。 */
+#floating-action-buttons {
+    align-items: flex-end;
+    opacity: 0.35;
+    transition: opacity var(--transition-fast), right var(--transition-normal);
+}
+
+#floating-action-buttons:hover,
+#floating-action-buttons:focus-within,
+#floating-action-buttons.controls-near {
+    opacity: 1;
+}
+
+/* Two columns so the ten tools still fit a short window without overflowing */
+.fab-menu {
+    display: grid;
+    grid-template-columns: repeat(2, 44px);
+    justify-content: end;
+    gap: 8px;
+}
+
+.fab-divider {
+    grid-column: 1 / -1;
+}
+
+
+
+/* Desktop-only speed dial: a vertical grid of icon buttons with hover
+   tooltips. Scoped, because the mobile panel is a different component
+   (labelled tiles) and used to need ~30 !important just to outrank these.
+   The condition is the exact complement of the mobile query used elsewhere:
+   NOT (max-width:768px OR short landscape). */
+@media screen and (min-width: 769px) and (min-height: 501px),
+       screen and (min-width: 769px) and (orientation: portrait) {
+    /* FAB Menu Buttons with Tooltip */
+    .fab-menu button {
+        position: relative;
+        min-width: 44px;
+        min-height: 44px;
+        border-radius: var(--radius-md);
+        padding: 10px 14px;
+        background: white;
+        border: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: var(--transition-ui);
+        box-shadow: var(--shadow-md);
+    }
+
+    /* Match the mobile speed dial — 14px inherited from button was unreadable */
+    .fab-menu button .icon {
+        font-size: 20px;
+        line-height: 1;
+    }
+
+    .fab-menu button:hover {
+        background: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+        transform: translateX(-4px);
+    }
+
+    .fab-menu button.active {
+        background: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+    }
+
+    /* Tooltip for FAB menu buttons */
+    .fab-menu button::after {
+        content: attr(title);
+        position: absolute;
+        right: calc(100% + 10px);
+        top: 50%;
+        transform: translateY(-50%);
+        padding: 8px 12px;
+        background: rgba(17, 24, 28, 0.95);
+        color: white;
+        font-size: 12px;
+        font-weight: 500;
+        border-radius: var(--radius-sm);
+        white-space: nowrap;
+        opacity: 0;
+        visibility: hidden;
+        transition: var(--transition-ui-200);
+        pointer-events: none;
+        z-index: 1001;
+        box-shadow: var(--shadow-md);
+    }
+
+    .fab-menu button::before {
+        content: '';
+        position: absolute;
+        right: calc(100% + 4px);
+        top: 50%;
+        transform: translateY(-50%);
+        border: 6px solid transparent;
+        border-left-color: rgba(17, 24, 28, 0.95);
+        opacity: 0;
+        visibility: hidden;
+        transition: var(--transition-ui-200);
+        pointer-events: none;
+    }
+
+    .fab-menu button:hover::after,
+    .fab-menu button:hover::before {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .fab-divider {
+        height: 1px;
+        background: var(--border-color);
+        margin: 4px 0;
+    }
+
+    /* Group label — hidden on desktop (dividers already separate groups) */
+    .fab-group-label {
+        display: none;
+    }
+}
+
+/* The toolbar already shows "第 N / M 頁" where there is room for it; this chip
+   exists for the phone, where that whole .nav-section is hidden. */
+#page-chip {
+    display: none;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex: none;
+}
+
+/* =================== OVERLAYS =================== */
+.page-nav-overlay {
+    position: fixed;
+    left: 50%;
+    /* Clear the home indicator: a bare 24px puts this inside the system
+       gesture area on a notched phone. Only the FABs were doing this. */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+    transform: translateX(-50%);
+    background: var(--glass-bg);
+    padding: 8px 24px;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    z-index: 900;
+    /* ponytail: idle 時淡出讓出頁面，hover/focus/觸控互動時恢復。
+       0.2 是可調的舒適度旋鈕，太低會找不到列。 */
+    opacity: 0.2;
+    backdrop-filter: none;
+    transition: opacity var(--transition-fast), backdrop-filter var(--transition-fast);
+}
+
+.page-nav-overlay:hover,
+.page-nav-overlay:focus-within,
+.page-nav-overlay:active,
+.page-nav-overlay.controls-near {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+}
+
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+/* =================== MODALS =================== */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.modal-content {
+    background: white;
+    width: 100%;
+    max-width: 500px;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    overflow: hidden;
+    animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.modal-overlay.active {
+    display: flex;
+    opacity: 1;
+}
+
+.modal-content {
+    background: var(--bg-primary);
+    width: 90%;
+    max-width: 480px;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-2xl);
+    overflow: hidden;
+    animation: slideUp 0.3s ease-out;
+    border: 1px solid var(--border-color);
+}
+
+.modal-content.side-panel {
+    position: fixed;
+    right: 20px;
+    top: 80px;
+    bottom: 20px;
+    width: 360px;
+    max-width: 400px;
+    height: auto;
+    border-radius: var(--radius-xl);
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-secondary);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    transition: var(--transition-ui);
+    line-height: 1;
+}
+
+.close-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--danger-color);
+}
+
+.modal-body {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.modal-body textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 0.938rem;
+    font-family: inherit;
+    resize: vertical;
+    box-sizing: border-box;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: border-color var(--transition-fast);
+}
+
+.modal-body textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: none;
+}
+
+.modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+/* Notes List Panel */
+#notes-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.note-list-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: var(--transition-ui);
+}
+
+.note-list-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-2px);
+}
+
+.note-list-item .note-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}
+
+.note-list-item .note-page {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: var(--primary-color);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+}
+
+.note-list-item .note-content-preview {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.empty-notes-message {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-tertiary);
+}
+
+.empty-notes-message .icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+.empty-notes-message p {
+    margin: 0;
+    font-size: 0.938rem;
+}
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideInLeft {
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* =================== NOTIFICATION SYSTEM =================== */
+#notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 350px;
+    /* Toasts report; they are not controls. A toast parked over the page must
+       not swallow taps for its three seconds — only its close button, which
+       opts back in below, stays clickable. */
+    pointer-events: none;
+}
+
+.notification {
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    color: white;
+    box-shadow: var(--shadow-md);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: slideIn 0.3s ease-out;
+    font-size: 14px;
+}
+
+/* White text needs 4.5:1 against these fills. The default-500 brand tones give
+   about 2:1, so notifications use darkened variants of the same hues. */
+.notification-success {
+    background-color: #0f7b3f;
+}
+
+.notification-error {
+    background-color: var(--danger-strong);
+}
+
+.notification-warning {
+    background-color: #8a5a00;
+}
+
+.notification-info {
+    background-color: var(--primary-color);
+}
+
+.notification-close {
+    pointer-events: auto;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+}
+
+.notification-close:hover {
+    opacity: 1;
+}
+
+.notification-icon {
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.notification-message {
+    flex: 1;
+}
+
+/* =================== LOADING OVERLAY =================== */
+#loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+}
+
+.loading-content {
+    text-align: center;
+    color: white;
+}
+
+.loading-spinner-large {
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+.loading-message {
+    font-size: 16px;
+    margin: 0;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+/* =================== BUTTON VISUAL FEEDBACK =================== */
+button:not(:disabled):active {
+    transform: scale(.97);
+    transform: scale(0.95);
+    transition: transform 0.1s;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.toolbar button.active {
+    background-color: var(--primary-color);
+    color: white;
+    box-shadow: 0 0 0 2px rgba(0, 111, 238, 0.3);
+}
+
+/* =================== PAGE SLIDER STYLES =================== */
+input[type="range"]::-webkit-slider-thumb {
+    transition: var(--transition-ui-200);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+/* =================== SMOOTH SCROLLING =================== */
+html {
+    scroll-behavior: smooth;
+}
+
+/* =================== GLOBAL SCROLLBAR STYLES =================== */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-hover);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+}
+
+/* =================== FOCUS STATE STYLES (ACCESSIBILITY) =================== */
+*:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+button:focus-visible {
+    outline-offset: 4px;
+}
+
+.custom-file-upload:focus-within {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* =================== ACCESSIBILITY HELPERS =================== */
+/* The file inputs are visually hidden rather than display:none — display:none
+   drops them out of the tab order, leaving no keyboard route to the picker. */
+.sr-only,
+.custom-file-upload input[type="file"],
+#toolbar label[for="fileInput"] input[type="file"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+/* =================== PERFORMANCE UTILITIES =================== */
+/* =================== MEDIA QUERIES (MOBILE OPTIMIZATION) =================== */
+
+/* 窄桌面（769-920px）：隱藏標題文字與「前往」按鈕，避免工具列溢位 */
+@media screen and (min-width: 769px) and (max-width: 920px) {
+    .app-title {
+        display: none;
+    }
+
+    #go-to-page-btn {
+        display: none;
+    }
+
+    #toolbar {
+        padding: 12px 12px;
+        gap: 8px;
+    }
+
+    .title-section {
+        margin-right: 4px;
+    }
+}
+
+/* =================== IN-APP BROWSER NOTICE =================== */
+/* Hidden until script.js finds it is running inside LINE */
+#inapp-browser-banner {
+    display: none;
+}
+
+#inapp-browser-banner.is-visible {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10000;
+    align-items: center;
+    gap: 10px;
+    /* Room on the right for the close button, which sits out of the flow */
+    padding: 10px 34px 10px 12px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: var(--shadow-md);
+}
+
+#inapp-browser-banner .banner-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+#inapp-browser-banner .banner-text strong {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+
+#inapp-browser-banner .banner-text span {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+}
+
+#inapp-browser-banner #inapp-open-external {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    border-radius: var(--radius-md);
+    white-space: nowrap;
+}
+
+#inapp-browser-banner .close-btn {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    border: none;
+    background: transparent;
+    font-size: 1.3rem;
+    line-height: 1;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    padding: 4px 6px;
+}
+
+/* Narrow phones: the button drops under the text rather than squeezing it */
+@media screen and (max-width: 420px) {
+    #inapp-browser-banner.is-visible {
+        flex-wrap: wrap;
+    }
+
+    #inapp-browser-banner #inapp-open-external {
+        width: 100%;
+        padding: 7px 12px;
+    }
+}
+
+/* Hide toolbar toggle tab on desktop */
+#toolbar-toggle-tab {
+    display: none;
+}
+
+/* Captions belong to the mobile floating buttons only */
+.fab-label {
+    display: none;
+}
+
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+
+    /* Mobile Menu Toggle — mirrors #main-fab at the opposite bottom corner */
+    #toolbar-toggle-tab {
+        position: fixed;
+        top: auto;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 80px);
+        left: 16px;
+        transition: bottom var(--transition-normal),
+                    transform var(--transition-fast), opacity var(--transition-fast);
+        z-index: 9999;
+        background: var(--primary-color);
+        border: none;
+        cursor: pointer;
+        box-shadow: var(--shadow-xl);
+        color: white;
+    }
+
+    /* Menu and tools read as one pair: same size, same height, opposite corners */
+    #toolbar-toggle-tab,
+    #main-fab {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        width: 56px;
+        height: 56px;
+        padding: 0;
+        border-radius: 18px;
+        flex-shrink: 0;
+    }
+
+    #toolbar-toggle-tab .icon,
+    #main-fab .icon {
+        font-size: 21px;
+        line-height: 1;
+    }
+
+    /* The caption is the point: "選單" / "工具" instead of three unexplained lines */
+    #toolbar-toggle-tab .fab-label,
+    #main-fab .fab-label {
+        display: block;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0.02em;
+    }
+
+    /* ponytail: idle 讓出頁面，互動或選單展開時恢復。
+       Only the disc is translucent — never the whole button. Fading the element
+       fades the label too, so text and background converge on the page colour;
+       white on #0E7C86 is 4.95:1 to begin with, so any whole-element alpha at
+       all drops it under AA (0.9 already measures 4.13:1). Letting the page
+       show through a darker disc keeps the label at full strength: the 25%
+       here measures 4.53:1 on a white page and 4.95:1 on the container grey. */
+    #toolbar-toggle-tab,
+    #main-fab {
+        background: rgba(10, 84, 91, 0.75);
+        -webkit-backdrop-filter: blur(6px);
+        backdrop-filter: blur(6px);
+    }
+
+    #toolbar-toggle-tab:active,
+    #app-container.menu-active #toolbar-toggle-tab,
+    #main-fab:active,
+    #main-fab.active {
+        background: var(--primary-color);
+    }
+
+    #toolbar-toggle-tab:active {
+        transform: scale(0.92);
+    }
+
+    /* Drawer open: same button, same spot, now reading as the way out.
+       Staying put keeps it clear of the tools button at the other corner.
+       Both states are real DOM now (icon + label pairs) rather than generated
+       content, so each one can be sized like every other icon. */
+    #toolbar-toggle-tab .icon-close,
+    #toolbar-toggle-tab .label-close {
+        display: none;
+    }
+
+    #app-container.menu-active #toolbar-toggle-tab .icon-menu,
+    #app-container.menu-active #toolbar-toggle-tab .label-menu {
+        display: none;
+    }
+
+    #app-container.menu-active #toolbar-toggle-tab .icon-close,
+    #app-container.menu-active #toolbar-toggle-tab .label-close {
+        display: block;
+    }
+
+    #app-container.menu-active #toolbar-toggle-tab .icon-close {
+        font-size: 21px;
+    }
+
+    #toolbar-toggle-tab .label-close {
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0.02em;
+        margin-top: 2px;
+    }
+
+    /* Mobile Sidebar Menu */
+    #toolbar {
+        position: fixed;
+        top: 0;
+        left: -300px;
+        width: 280px;
+        max-width: 85vw;
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+        background: var(--bg-primary);
+        border-right: 1px solid var(--border-color);
+        padding: 20px;
+        box-sizing: border-box;
+        box-shadow: var(--shadow-xl);
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        transition: left var(--transition-slow);
+        z-index: 1001;
+        overflow-y: auto;
+        overflow-x: hidden;
+        gap: 12px;
+    }
+
+    #app-container.menu-active #toolbar {
+        left: 0;
+    }
+
+    #toolbar>* {
+        flex-shrink: 0;
+    }
+
+    /* The session buttons live in the drawer on mobile. They used to be hidden
+       here, which left no way at all to restore a previous set of files on a
+       phone; the drawer has room for them now. */
+
+    /* Limit SVG sizes in toolbar */
+    #toolbar svg {
+        width: 24px;
+        height: 24px;
+        max-width: 24px;
+        max-height: 24px;
+    }
+
+    #toolbar input[type="text"],
+    #toolbar input[type="number"],
+    #toolbar select,
+    #toolbar button {
+        width: 100%;
+        padding: 12px;
+        font-size: 1rem;
+    }
+
+    /* File upload button styling for mobile */
+    #toolbar label[for="fileInput"] {
+        display: flex !important;
+        width: 100%;
+        padding: 12px;
+        background: var(--primary-color);
+        color: white;
+        border-radius: var(--radius-md);
+        text-align: center;
+        justify-content: center;
+        cursor: pointer;
+        font-weight: 600;
+        white-space: nowrap;
+        /* Prevent wrapping */
+    }
+
+    .title-section {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .app-logo {
+        width: 44px;
+        height: 44px;
+        font-size: 1rem;
+        flex-shrink: 0;
+    }
+
+    .app-title {
+        display: block;
+        font-size: 1.25rem;
+    }
+
+    .file-section {
+        width: 100%;
+        flex-direction: column;
+        gap: 10px;
+        order: 1;
+    }
+
+    .search-section {
+        order: 2;
+        width: 100%;
+        max-width: none;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border-color);
+        /* Flex Wrap for Mobile Layout */
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .search-input-wrap {
+        flex: 1 1 100%;
+        width: 100%;
+        order: 1;
+        margin-bottom: 4px;
+    }
+
+    #search-action-button {
+        flex: 1;
+        order: 2;
+    }
+
+    /* Ensure the file filter dropdown inside search section shares space properly */
+    .search-section #fileFilterDropdown {
+        flex: 1;
+        order: 3;
+    }
+
+    /* Keep a short, scrollable result list so pages have context */
+    #results-list {
+        display: block;
+        max-height: 26vh;
+        padding: 0 16px 12px;
+    }
+
+
+    #panel-dropdown-container {
+        display: block !important;
+        border-bottom: none;
+        /* Aesthetic tweak since list is gone */
+    }
+
+    .nav-section {
+        width: 100%;
+        flex-direction: column;
+        gap: 10px;
+        order: 3;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    #page-num-display {
+        text-align: center;
+        padding: 10px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+    }
+
+    /* Mobile Empty State */
+    .empty-state-guide {
+        max-width: min(92vw, 460px);
+        padding: 32px 28px;
+        margin-top: 5vh;
+    }
+
+    .empty-state-guide .icon {
+        font-size: 64px;
+        margin-bottom: 20px;
+    }
+
+    .empty-state-guide h2 {
+        font-size: 1.5rem;
+    }
+
+    .empty-state-guide p {
+        font-size: 1rem;
+    }
+
+    /* === Compact Search Results Panel (Task 2026-01-03) === */
+    #resizer {
+        display: none !important;
+    }
+
+    #search-results-panel {
+        position: fixed;
+        max-width: none;
+        left: 12px;
+        right: 12px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+        height: auto;
+        /* changed from 70vh */
+        width: auto !important;
+        flex: none;
+        border-left: none;
+        border-top: 1px solid var(--border-color);
+        border-radius: var(--radius-xl);
+        transform: translateY(100%);
+        transition: transform var(--transition-normal);
+        display: flex !important;
+        visibility: hidden;
+        z-index: 1001;
+        /* Ensure it's above other content */
+        background: rgba(255, 255, 255, 0.98);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    #app-container.results-panel-visible #search-results-panel {
+        transform: translateY(0);
+        visibility: visible;
+    }
+
+    /* Hide the panel title on mobile to save space */
+    #search-results-panel h3 {
+        display: none !important;
+    }
+
+    /* Expanded, the sheet gets a close button in its own top right corner.
+       Before this the only way to collapse it was to tap a page, which also
+       navigated. */
+    body:not(.results-collapsed) #results-collapse-btn {
+        display: flex;
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 2;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border: 1px solid var(--border-color);
+        border-radius: 50%;
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: 1.25rem;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    body:not(.results-collapsed) #results-collapse-btn:active {
+        background: var(--bg-secondary);
+    }
+
+    /* Room for it, so it never sits on top of the export button */
+    body:not(.results-collapsed) #panel-dropdown-container {
+        padding-right: 48px;
+    }
+
+    /* Collapsed after a page is picked: the sheet leaves a bar behind, and the
+       bar is what brings it back. Expanded, the title stays hidden so the
+       carousel keeps every pixel it has. */
+    body.results-collapsed #search-results-panel h3 {
+        display: flex !important;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: none;
+        background: transparent;
+        font-size: 0.95rem;
+        cursor: pointer;
+    }
+
+    /* The only icon that cannot be a sprite <use>: generated content has no
+       child element. Same Lucide chevron-up path, as a mask so it still takes
+       its colour from currentColor. */
+    body.results-collapsed #search-results-panel h3::after {
+        content: '';
+        width: 12px;
+        height: 12px;
+        flex: none;
+        background-color: var(--text-tertiary);
+        -webkit-mask: var(--icon-chevron-up) center / contain no-repeat;
+        mask: var(--icon-chevron-up) center / contain no-repeat;
+    }
+
+    /* Step through hits straight from the bar, the way a find bar works */
+    body.results-collapsed .results-stepper {
+        display: flex;
+        gap: 6px;
+        margin-left: auto;
+        margin-right: 4px;
+    }
+
+    body.results-collapsed .results-stepper button {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid var(--border-color);
+        border-radius: 50%;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: 1.1rem;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    body.results-collapsed .results-stepper button:active {
+        background: var(--primary-color);
+        color: white;
+    }
+
+    /* The bar carries the position, so the static title is just noise there */
+    body.results-collapsed #search-results-panel h3 .panel-title {
+        display: none;
+    }
+
+    #results-count {
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+    }
+
+    body.results-collapsed #panel-dropdown-container,
+    body.results-collapsed #results-list {
+        display: none !important;
+    }
+
+    /* Style the container to look like a bottom bar */
+    #panel-dropdown-container {
+        display: flex !important;
+        flex-direction: row;
+        gap: 8px;
+        padding: 12px 16px;
+        background: transparent;
+        border-bottom: none;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Make dropdowns share space */
+    #panelFileFilterDropdown {
+        flex: 1;
+        margin-bottom: 0;
+        /* Remove bottom margin if any */
+    }
+
+    #panelResultsDropdown {
+        flex: 2;
+    }
+
+    /* === Mobile FAB: Floating panel above button === */
+    #floating-action-buttons {
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 80px);
+        right: 16px;
+        display: flex !important;
+        flex-direction: column-reverse;
+        align-items: flex-end;
+        gap: 8px;
+        z-index: 1002;
+    }
+
+    /* Keep FAB on-screen when search results panel is visible
+       (override the desktop right: 390px rule) */
+    body.results-bar-visible #floating-action-buttons {
+        right: 16px;
+    }
+
+    /* Stack above the results sheet instead of underneath it.
+       --panel-h is measured in JS when the panel opens. */
+    body.results-bar-visible .page-nav-overlay {
+        bottom: calc(env(safe-area-inset-bottom, 0px) + var(--panel-h, 0px) + 12px);
+    }
+
+    /* Choosing a page from the carousel: zoom controls have no part in that,
+       so they hand the remaining strip back to the document. */
+    body.results-bar-visible.thumb-mode:not(.results-collapsed) .page-nav-overlay {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    body.results-bar-visible #floating-action-buttons,
+    body.results-bar-visible #toolbar-toggle-tab {
+        bottom: calc(var(--panel-h, 0px) + 72px);
+    }
+
+    .fab-container {
+        position: relative;
+    }
+
+    /* Hide speed dial and dividers/labels by default. No !important: the
+       desktop rules it used to fight are now scoped to desktop, so
+       #fab-speed-dial.active wins on specificity as it should. */
+    #fab-speed-dial {
+        display: none;
+    }
+
+    .fab-divider,
+    .fab-group-label {
+        display: none !important;
+    }
+
+    /* Mobile: only show the 4 essential buttons */
+    #fab-speed-dial #toggle-underline-btn,
+    #fab-speed-dial #toggle-text-selection-btn,
+    #fab-speed-dial #toggle-paragraph-selection-btn,
+    #fab-speed-dial #copy-page-text-btn,
+    #fab-speed-dial #view-notes-btn,
+    #fab-speed-dial #toggle-notes-btn {
+        display: none !important;
+    }
+
+    /* Floating panel when active — appears above the FAB button */
+    #fab-speed-dial.active {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.88);
+        -webkit-backdrop-filter: blur(20px) saturate(1.8);
+        backdrop-filter: blur(20px) saturate(1.8);
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.14);
+        width: 156px;
+        animation: fabPanelIn 0.18s ease-out;
+    }
+
+    /* Compact tile buttons */
+    #fab-speed-dial.active button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        width: 100%;
+        height: 64px;
+        border-radius: 10px;
+        padding: 6px 4px;
+        background: rgba(243, 244, 246, 0.9);
+        border: 1px solid rgba(0, 0, 0, 0.07);
+        box-shadow: none;
+        transform: none;
+        color: var(--text-primary);
+        box-sizing: border-box;
+    }
+
+    #fab-speed-dial.active button.active {
+        background: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+    }
+
+    #fab-speed-dial.active button span.icon {
+        display: inline-flex;
+        font-size: 22px;
+        line-height: 1;
+    }
+
+    /* Tooltip as label */
+    #fab-speed-dial.active button::after {
+        content: attr(title);
+        position: static;
+        transform: none;
+        opacity: 1;
+        visibility: visible;
+        background: transparent;
+        color: inherit;
+        font-size: 10px;
+        font-weight: 500;
+        padding: 0;
+        box-shadow: none;
+        white-space: normal;
+        text-align: center;
+        line-height: 1.2;
+        max-width: 100%;
+    }
+
+    #fab-speed-dial.active button::before {
+        display: none;
+    }
+
+    /* Colour is set with its pair further up (translucent disc); this block
+       only needs the properties specific to the tools button. Re-declaring
+       background here would beat that rule on source order alone. */
+    #main-fab {
+        color: white;
+        box-shadow: var(--shadow-xl);
+    }
+
+    @keyframes fabPanelIn {
+        from { opacity: 0; transform: scale(0.85) translateY(8px); }
+        to   { opacity: 1; transform: scale(1)    translateY(0); }
+    }
+
+    #pdf-container {
+        padding: 12px 12px 100px;
+    }
+}
+
+/* === Landscape: put panel to the LEFT of FAB (viewport too short for stacked) === */
+@media screen and (orientation: landscape) and (max-height: 500px) {
+    /* Short landscape has little height to spare, and the controls sit in a
+       single compact row rather than the stacked portrait chrome — reserving
+       the full 100px here just shrinks the page and adds dead scroll. */
+    #pdf-container {
+        padding: 10px 10px 56px;
+    }
+
+    #floating-action-buttons {
+        flex-direction: row-reverse !important;
+        align-items: center !important;
+        gap: 10px !important;
+    }
+
+    #fab-speed-dial.active {
+        grid-template-columns: repeat(4, 1fr);
+        width: 296px;
+    }
+
+    @keyframes fabPanelIn {
+        from { opacity: 0; transform: scale(0.85) translateX(8px); }
+        to   { opacity: 1; transform: scale(1)    translateX(0); }
+    }
+
+    /* Mobile Bottom Navigation Bar */
+    .page-nav-overlay {
+        left: 8px;
+        right: 8px;
+        transform: none;
+        width: auto;
+        padding: 6px 10px;
+        gap: 6px;
+        flex-wrap: nowrap;
+        justify-content: center;
+    }
+
+    .page-nav-overlay input[type="range"] {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .page-nav-overlay .toolbar-divider {
+        display: none;
+    }
+
+    .page-nav-overlay button {
+        padding: 6px 10px;
+        font-size: 0.75rem;
+    }
+
+    /* Shorten button text on mobile */
+    .fit-width-btn,
+    .fit-height-btn {
+        font-size: 0.7rem;
+    }
+
+    #zoom-level-display {
+        min-width: 40px;
+        font-size: 0.75rem;
+        padding: 4px;
+    }
+
+    /* === Mobile UI Adjustments (Task 2026-01-03) === */
+
+    /* 1. Disable Note Input */
+    #toggle-notes-btn {
+        display: none !important;
+    }
+
+    /* Hide save/delete buttons in note modal on mobile */
+    #note-modal .modal-footer #save-note-btn,
+    #note-modal .modal-footer #delete-note-btn {
+        display: none !important;
+    }
+
+    /* 3. Position Dropdown Menu Centered at Bottom */
+    .file-switch-section {
+        position: fixed;
+        bottom: 15vh;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1002;
+        width: auto;
+        min-width: 200px;
+        background: transparent;
+        pointer-events: none;
+        /* Allow clicking through the container */
+    }
+
+    #fileSwitchDropdown {
+        pointer-events: auto;
+        /* Re-enable pointer events for the dropdown */
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(8px);
+        box-shadow: var(--shadow-xl);
+        border: 1px solid var(--primary-color);
+        color: var(--text-primary);
+        font-weight: 600;
+        text-align: center;
+        width: 100%;
+        max-width: 280px;
+        margin: 0 auto;
+        display: block;
+    }
+
+    /* Hide the original file switch section in the sidebar to avoid duplication visually if needed, 
+       but here we are moving the class itself. 
+       We need to ensure it's not hidden by sidebar styles if we move it out of flow visually.
+    */
+    #toolbar .file-switch-section {
+        order: 10;
+        /* Ensure it sits on top if still in flex container */
+    }
+}
+
+
+@media screen and (max-width: 768px) and (orientation: portrait) {
+    /* Bound the bottom nav to the viewport so the page slider isn't clipped */
+    .page-nav-overlay {
+        left: 8px;
+        right: 8px;
+        transform: none;
+        width: auto;
+        padding: 6px 10px;
+        gap: 6px;
+        box-sizing: border-box;
+    }
+
+    .page-nav-overlay input[type="range"] {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+}
+
+@media screen and (max-width: 480px) {
+    .nav-section button span {
+        display: none;
+    }
+
+    .app-logo {
+        width: 40px;
+        height: 40px;
+        font-size: 0.9rem;
+    }
+
+    #pdf-container {
+        padding: 10px 10px 100px;
+    }
+}
+
+@keyframes slideInUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* The fit buttons exist twice: in the bottom bar (roomy on desktop) and in the
+   tools menu (where a phone has space for them). Each context shows one. */
+#fab-fit-width-btn,
+#fab-fit-height-btn {
+    display: none;
+}
+
+/* The two fit buttons cost 124px of a 374px bar, leaving the slider 52px —
+   0.26px per page in a 200-page document, so one pixel of thumb travel jumped
+   four pages. On a phone they live in the tools menu instead and the slider
+   gets the width back. Same mobile condition as the rest of the file. */
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+
+    .page-nav-overlay .fit-width-btn,
+    .page-nav-overlay .fit-height-btn {
+        display: none;
+    }
+
+    #fab-fit-width-btn,
+    #fab-fit-height-btn {
+        display: inline-flex;
+    }
+
+    #page-chip {
+        display: block;
+    }
+}
+
+/* Mobile page arrows: on a phone the only ways to turn a page were a swipe
+   that nothing advertises, and the slider. Desktop has the toolbar pair. */
+.page-arrow {
+    display: none;
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-md);
+    color: var(--text-primary);
+    /* Semi-transparent because these sit on the page itself — solid would
+       cover the text they exist to help you read. Full opacity while pressed
+       so a tap still confirms itself. */
+    opacity: 0.55;
+    z-index: 900;
+}
+
+#page-prev-overlay { left: 8px; }
+#page-next-overlay { right: 8px; }
+
+.page-arrow:active {
+    opacity: 1;
+    transform: translateY(-50%) scale(0.92);
+}
+
+/* At the first or last page it would do nothing; hide it rather than leave a
+   dead control sitting on top of the page swallowing taps. */
+.page-arrow[disabled] {
+    display: none !important;
+}
+
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+
+    #app-container.has-docs .page-arrow {
+        display: inline-flex;
+    }
+}
+
+/* =================== TOUCH TARGETS =================== */
+/* 44x44 is the practical floor for a finger. These controls were 24-42px,
+   which is fine for a cursor and a coin-toss for a thumb. Growing the hit area
+   rather than the visible box keeps the compact look. */
+@media (hover: none) {
+
+    #zoom-in-btn,
+    #zoom-out-btn,
+    #results-collapse-btn,
+    #prev-result-btn,
+    #next-result-btn,
+    #clear-search-btn,
+    .close-btn {
+        position: relative;
+    }
+
+    #zoom-in-btn::after,
+    #zoom-out-btn::after,
+    #results-collapse-btn::after,
+    #prev-result-btn::after,
+    #next-result-btn::after,
+    #clear-search-btn::after,
+    .close-btn::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 44px;
+        height: 44px;
+        transform: translate(-50%, -50%);
+    }
+}
+
+/* =================== TOUCH: NO IDLE FADE =================== */
+/* The idle fade is a pointer affordance: on desktop the controls come back as
+   the cursor approaches (.controls-near, added on mousemove). A touch device
+   has no cursor and no hover, so that never fires and the controls simply stay
+   dim — you have to tap a control you can barely see before it becomes legible.
+   Composited against the page, the 0.45 label was measuring under 2:1.
+   Keep the fade where there is a pointer to justify it; everywhere else, don't.
+   The menu and tools buttons are not listed: they are translucent by
+   background rather than by opacity, so they stay readable on their own. */
+@media (hover: none) {
+
+    .page-nav-overlay,
+    #floating-action-buttons {
+        opacity: 1 !important;
+    }
+}
+
+/* =================== REDUCED MOTION =================== */
+/* Nine animations plus every transition; vestibular triggers are a real
+   accessibility problem, and the OS already tells us when to stop. */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* =================== PRINT STYLES =================== */
+@media print {
+
+    #toolbar,
+    #floating-action-buttons,
+    #empty-state,
+    #resizer {
+        display: none !important;
+    }
+
+    #pdf-container {
+        padding: 0;
+    }
+
+    #pdf-canvas {
+        border: none;
+        box-shadow: none;
+    }
+}
+
+#export-results-pdf-btn {
+    display: block;
+    width: 100%;
+    margin: 10px 0 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 0.938rem;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: var(--transition-ui);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+#export-results-pdf-btn:hover {
+    border-color: var(--primary-color);
+}
+
+/* === Landscape: fade the search panel until touched so it doesn't block the page === */
+@media screen and (orientation: landscape) and (max-height: 500px) {
+    #app-container.results-panel-visible #search-results-panel {
+        opacity: 0.35;
+        transition: transform var(--transition-normal), opacity var(--transition-fast);
+    }
+
+    #app-container.results-panel-visible #search-results-panel.panel-focused {
+        opacity: 1;
+    }
+}
+
+/* === Mobile drawer follows the actual flow: 開檔 → 切換檔案 → 搜尋 === */
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+
+    /* Page navigation lives in the bottom slider bar; drop the duplicate here */
+    #toolbar .nav-section {
+        display: none !important;
+    }
+
+    /* Nothing to switch or search until a file is open */
+    #toolbar .file-switch-section,
+    #toolbar .search-section {
+        display: none;
+    }
+
+    #app-container.has-docs #toolbar .file-switch-section {
+        display: block;
+        order: 2;
+    }
+
+    #app-container.has-docs #toolbar .search-section {
+        display: flex;
+        order: 3;
+        flex-grow: 0;
+        align-content: flex-start;
+    }
+}
+
+/* Low-frequency action on mobile: shrink the export button to a chip
+   (declared last so it beats the base #export-results-pdf-btn width) */
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+    #export-results-pdf-btn {
+        width: auto;
+        flex: 0 0 auto;
+        margin: 0;
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+    }
+
+    #panel-dropdown-container {
+        flex-wrap: nowrap;
+    }
+}
+
+/* === Mobile search results: the list replaces the result dropdown === */
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+    #panelResultsDropdown {
+        display: none;
+    }
+
+    #panelFileFilterDropdown {
+        flex: 1;
+    }
+}
+
+
+/* Mode is the user's choice (see #results-view-toggle), not the device's */
+#results-list.mode-list .thumbnail-canvas {
+    display: none;
+}
+
+#results-list.single-doc .doc-name {
+    display: none;
+}
+
+#results-view-toggle {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+    /* Thumbnails become a snap carousel: the page you are on fills the sheet,
+       its neighbours peek in from both edges so the strip reads as browsable.
+       The side padding is what makes the peek, so the card itself asks for the
+       full content width. */
+    #results-list.mode-thumb {
+        display: flex;
+        flex-direction: row;
+        gap: 10px;
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 2px 9% 10px;
+        scroll-snap-type: x mandatory;
+        scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    #results-list.mode-thumb::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Touch leaves :hover stuck on the last card tapped, which would read as a
+       second selection next to the focused one. */
+    #results-list.mode-thumb .result-item:not(.is-current):not(.is-focused):hover {
+        border-color: var(--border-color);
+        box-shadow: none;
+    }
+
+    #results-list.mode-thumb .result-item {
+        flex: 0 0 100%;
+        margin-bottom: 0;
+        padding: 8px;
+        scroll-snap-align: center;
+        transition: transform var(--transition-normal), opacity var(--transition-normal);
+    }
+
+    /* The card in the middle is the one being browsed, so it stays lit and the
+       rest step back. Guarded by :has() so nothing dims before the first
+       measurement, and on browsers without :has() everything simply stays lit. */
+    #results-list.mode-thumb:has(.is-focused) .result-item:not(.is-focused) {
+        opacity: 0.45;
+        transform: scale(0.92);
+    }
+
+    /* Portrait-page ratio, so an A4 or Letter page fills the card edge to edge
+       instead of sitting in a letterbox. Set up front, so the card does not
+       jump when the thumbnail finishes rendering. */
+    #results-list.mode-thumb .thumbnail-canvas {
+        min-height: 0;
+        height: auto;
+        aspect-ratio: 1 / 1.414;
+        max-height: min(58vh, 520px);
+        object-fit: contain;
+        margin-bottom: 6px;
+    }
+
+    #results-list.mode-thumb .page-info {
+        font-size: 0.7rem;
+        margin-bottom: 0;
+        text-align: center;
+    }
+
+    /* The filename is redundant here; keep the keyword context instead */
+    #results-list.mode-thumb .doc-name {
+        display: none;
+    }
+
+    #results-list.mode-thumb .context-snippet {
+        font-size: 0.65rem;
+        line-height: 1.3;
+        text-align: center;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+}
+
+@media screen and (orientation: landscape) and (max-height: 500px) {
+    #panel-dropdown-container {
+        padding: 8px 12px;
+    }
+
+    #results-list.mode-list {
+        max-height: 22vh;
+    }
+
+    /* Short screen: height is the scarce axis, so it drives the card and the
+       width follows the page shape. A wide card here would letterbox the page
+       into a sliver. The side padding is exactly half a card, which is what
+       lets the first and last cards reach the middle. */
+    #results-list.mode-thumb {
+        --thumb-h: min(28vh, 150px);
+        /* + 18px covers the card's own padding and border, so the canvas inside
+           lands exactly on the page ratio */
+        --thumb-card-w: calc(var(--thumb-h) / 1.414 + 18px);
+        padding-inline: calc(50% - var(--thumb-card-w) / 2);
+    }
+
+    #results-list.mode-thumb .result-item {
+        flex: 0 0 var(--thumb-card-w);
+        box-sizing: border-box;
+        /* Without this the caption's minimum size widens the card past its
+           basis, and the page ends up letterboxed inside it again. */
+        min-width: 0;
+    }
+
+    #results-list.mode-thumb .thumbnail-canvas {
+        height: var(--thumb-h);
+        max-height: none;
+        aspect-ratio: auto;
+    }
+
+    /* One line of context: the sheet has no room for two here */
+    #results-list.mode-thumb .context-snippet {
+        -webkit-line-clamp: 1;
+    }
+}
+
+/* Current page in the search results */
+.result-item.is-current {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px var(--primary-color) inset;
+}
+
+.empty-state-guide {
+    cursor: pointer;
+}
+
+/* Nothing to zoom or annotate before a file is open */
+#app-container:not(.has-docs) .page-nav-overlay,
+#app-container:not(.has-docs) #floating-action-buttons {
+    display: none;
+}
+
+/* Version line: only in the mobile drawer, so users can report what they see */
+/* 安裝按鈕：只在瀏覽器回報「這個站可以安裝」時由 script.js 取消 hidden，
+   靠右站在工具列尾端。手機上工具列是抽屜，改由 DOM 順序排在最下方。
+   同 #clear-search-btn：generic `button { display: inline-flex }` 蓋過 UA 的
+   [hidden]，少了下面這條，按鈕永遠顯示。 */
+#install-app-btn[hidden] {
+    display: none;
+}
+
+#install-app-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.app-version {
+    display: none;
+}
+
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+    .app-version {
+        display: block;
+        order: 20;
+        margin-top: auto;
+        padding-top: 12px;
+        font-size: 0.75rem;
+        color: var(--text-tertiary);
+        text-align: center;
+    }
+}
+
+/* The mobile drawer stretches every button; not this one */
+@media screen and (max-width: 768px),
+       screen and (orientation: landscape) and (max-height: 500px) {
+    #toolbar #clear-search-btn {
+        width: 24px;
+        padding: 0;
+        font-size: 18px;
+    }
+}

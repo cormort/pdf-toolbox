@@ -1,0 +1,332 @@
+package main
+
+// RGB → CMYK：單色黑前處理（pdfscan.go）→ Ghostscript 以 Japan Color 2011 Coated 轉換 → 印刷預檢。
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+//go:embed icc/*.icc
+var iccFS embed.FS
+
+const (
+	cmykProfileName = "Japan Color 2011 Coated"
+	tacLimit        = 300 // 總墨量上限（C+M+Y+K，%）
+	convertTimeout  = 5 * time.Minute
+	inspectTimeout  = 90 * time.Second
+)
+
+var gsPath, gsVersion, iccDir string
+
+func initCMYK() {
+	gsPath = findGS()
+	if gsPath != "" {
+		out, _ := runGS(10*time.Second, "--version")
+		gsVersion = strings.TrimSpace(string(out))
+	}
+	log.Printf("Ghostscript：%q %s", gsPath, gsVersion)
+	iccDir = filepath.Join(workDir, "icc")
+	os.MkdirAll(iccDir, 0o755)
+	entries, _ := iccFS.ReadDir("icc")
+	for _, e := range entries {
+		b, _ := iccFS.ReadFile("icc/" + e.Name())
+		os.WriteFile(filepath.Join(iccDir, e.Name()), b, 0o644)
+	}
+}
+
+// 可攜版優先用 exe 旁邊的 gs\bin\gswin64c.exe，其次找 PATH（開發機上的 gs）
+func findGS() string {
+	if p := filepath.Join(exeDir, "gs", "bin", "gswin64c.exe"); fileExists(p) {
+		return p
+	}
+	for _, n := range []string{"gswin64c", "gs"} {
+		if p, err := exec.LookPath(n); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// Ghostscript 參數一律用正斜線：Windows 接受，也避開 gs 對反斜線的跳脫處理
+func slash(p string) string { return filepath.ToSlash(p) }
+
+func runGS(timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, gsPath, args...)
+	hideWindow(cmd)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return out, fmt.Errorf("超過 %s 未完成", timeout)
+	}
+	if err != nil {
+		return out, fmt.Errorf("%v\n%s", err, bytes.TrimSpace(out))
+	}
+	return out, nil
+}
+
+type cmykResult struct {
+	OK       bool     `json:"ok"`
+	Report   []string `json:"report"`
+	Download string   `json:"download,omitempty"`
+}
+
+func handleCMYK(w http.ResponseWriter, r *http.Request) {
+	res := cmykResult{}
+	defer func() { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res) }()
+	add := func(format string, a ...any) { res.Report = append(res.Report, fmt.Sprintf(format, a...)) }
+
+	if gsPath == "" {
+		add("❌ 找不到 Ghostscript：請把 gs 資料夾放在 PdfToolbox.exe 旁邊（gs\\bin\\gswin64c.exe）。")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
+	file, hdr, err := r.FormFile("file")
+	if err != nil {
+		add("❌ 沒有收到檔案：%v", err)
+		return
+	}
+	defer file.Close()
+	if !strings.EqualFold(filepath.Ext(hdr.Filename), ".pdf") {
+		add("❌ 只支援 PDF；Word 檔請先在 Word 另存成 PDF（版面最準）。")
+		return
+	}
+
+	id := randomID()
+	dir := filepath.Join(workDir, id)
+	os.MkdirAll(dir, 0o755)
+	// 暫存檔一律用 ASCII 檔名，原檔名只用在下載名稱，避開中文路徑的問題
+	in := filepath.Join(dir, "in.pdf")
+	if err := saveTo(in, file); err != nil {
+		add("❌ 無法儲存上傳檔：%v", err)
+		return
+	}
+
+	src := in
+	var before *scan
+	if r.FormValue("forceK") == "1" {
+		k := filepath.Join(dir, "k.pdf")
+		before, err = scanPDF(in, k)
+		switch {
+		case err != nil:
+			add("⚠️ 單色黑前處理失敗，改用原檔轉換：%v", err)
+		case before.Changed == 0:
+			add("ℹ️ 單色黑前處理：沒有找到需要改寫的 RGB 黑色或灰色文字／線條。")
+		default:
+			src = k
+			add("✅ 單色黑前處理：已將 %d 處 RGB 黑色／灰色文字、線條與色塊改為單色黑（只用 K 版）。", before.Changed)
+		}
+	} else {
+		before, err = scanPDF(in, "")
+	}
+	if err == nil {
+		res.Report = append([]string{"【轉換前】\n" + formatSpaces(before.Spaces)}, res.Report...)
+	}
+
+	out := filepath.Join(dir, "out.pdf")
+	if _, err := runGS(convertTimeout, "-dSAFER", "--permit-file-read="+slash(iccDir)+"/",
+		"-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite",
+		// /prepress 已含 PDF 1.7、字型嵌入與子集化、彩色／灰階 300 ppi、單色 1200 ppi；
+		// 它預設 LeaveColorUnchanged，所以色彩轉換要另外指定
+		"-dPDFSETTINGS=/prepress", "-sColorConversionStrategy=CMYK",
+		"-dOverrideICC=true", "-dRenderIntent=1", // 以承印廠指定的 ICC 為準
+		"-sDefaultRGBProfile="+slash(filepath.Join(iccDir, "sRGB_IEC61966-2-1_no_black_scaling.icc")),
+		"-sOutputICCProfile="+slash(filepath.Join(iccDir, "JapanColor2011Coated.icc")),
+		"-sOutputFile="+slash(out), slash(src)); err != nil || !fileExists(out) {
+		add("❌ Ghostscript 轉換失敗：%v", err)
+		return
+	}
+	st, _ := os.Stat(out)
+	add("✅ CMYK 轉換完成\n📦 檔案大小：%.2f MB\n🔧 Ghostscript：%s\n📐 ICC Profile：%s\n🖼️ 彩色／灰階圖片上限 300 ppi，單色 1200 ppi\n🔤 字型：要求嵌入及子集化",
+		float64(st.Size())/1024/1024, gsVersion, cmykProfileName)
+
+	if after, err := scanPDF(out, ""); err != nil {
+		add("⚠️ 無法分析輸出檔：%v", err)
+	} else {
+		add("【轉換後】\n%s\n%s", formatSpaces(after.Spaces), evaluateSpaces(after.Spaces))
+		add("%s", formatFonts(after.Fonts))
+	}
+	add("%s", inspectInk(out, dir))
+	add("⚠️ 本工具產生的是指定 ICC Profile 的 CMYK PDF，不等同於已通過 PDF/X 認證。\n⚠️ 若原始圖片解析度不足，轉成 300 ppi 不會憑空增加細節。")
+
+	name := strings.TrimSuffix(hdr.Filename, filepath.Ext(hdr.Filename)) + "_cmyk.pdf"
+	res.OK = true
+	res.Download = "/api/file/" + id + "/" + url.PathEscape(name)
+}
+
+func handleFile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := hex.DecodeString(id); err != nil || len(id) != 16 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(r.PathValue("name")))
+	http.ServeFile(w, r, filepath.Join(workDir, id, "out.pdf"))
+}
+
+func randomID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func saveTo(path string, r io.Reader) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// ---- 報告 ----
+
+var friendlySpace = map[string]string{
+	"DeviceRGB": "RGB", "CalRGB": "RGB（校準）", "ICC-RGB": "RGB（ICC）",
+	"DeviceCMYK": "CMYK", "ICC-CMYK": "CMYK（ICC）",
+	"DeviceGray": "灰階", "CalGray": "灰階（校準）", "ICC-Gray": "灰階（ICC）",
+	"Separation": "特別色", "DeviceN": "DeviceN／多色版", "Indexed": "索引色",
+	"ICCBased": "ICC 色彩空間", "Pattern": "圖樣", "Lab": "Lab",
+}
+
+func formatSpaces(spaces map[string]bool) string {
+	if len(spaces) == 0 {
+		return "📄 未偵測到明確色彩空間；文件可能主要為純文字或預設黑色物件。"
+	}
+	var names []string
+	for k := range spaces {
+		if f, ok := friendlySpace[k]; ok {
+			k = f
+		}
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return "🎨 偵測到的色彩空間：" + strings.Join(names, "、")
+}
+
+func evaluateSpaces(spaces map[string]bool) string {
+	if spaces["DeviceRGB"] || spaces["CalRGB"] || spaces["ICC-RGB"] {
+		return "⚠️ 色彩預檢：輸出仍偵測到 RGB。請勿僅依此判定可直接付印，建議再用專業預檢軟體確認。"
+	}
+	if spaces["DeviceCMYK"] || spaces["ICC-CMYK"] {
+		return "✅ 色彩預檢：未偵測到 RGB，並已偵測到 CMYK。"
+	}
+	return "ℹ️ 色彩預檢：未偵測到 RGB，也未辨識出明確 CMYK；文件可能主要為灰階或純文字。"
+}
+
+func formatFonts(fonts map[string]bool) string {
+	if len(fonts) == 0 {
+		return "ℹ️ 字型預檢：沒有字型資源。"
+	}
+	var missing []string
+	for name, emb := range fonts {
+		if !emb {
+			missing = append(missing, "• "+name)
+		}
+	}
+	if len(missing) == 0 {
+		return fmt.Sprintf("✅ 字型預檢：共 %d 個字型，均已嵌入。", len(fonts))
+	}
+	sort.Strings(missing)
+	if len(missing) > 15 {
+		missing = append(missing[:15], fmt.Sprintf("• 另有 %d 個", len(missing)-15))
+	}
+	return fmt.Sprintf("❌ 字型預檢：%d 個字型未嵌入。\n%s", len(missing), strings.Join(missing, "\n"))
+}
+
+// formatPages 把頁碼整理成「1-3, 5, 8」，最多列 12 段。pages 需已排序。
+func formatPages(pages []int) string {
+	var ranges []string
+	for i := 0; i < len(pages); {
+		j := i
+		for j+1 < len(pages) && pages[j+1] == pages[j]+1 {
+			j++
+		}
+		if i == j {
+			ranges = append(ranges, fmt.Sprint(pages[i]))
+		} else {
+			ranges = append(ranges, fmt.Sprintf("%d-%d", pages[i], pages[j]))
+		}
+		i = j + 1
+	}
+	if len(ranges) > 12 {
+		return strings.Join(ranges[:12], ", ") + fmt.Sprintf(" 等 %d 頁", len(pages))
+	}
+	return strings.Join(ranges, ", ")
+}
+
+// inspectInk 以 72 dpi 點陣化 CMYK 輸出，檢查總墨量與四色黑。
+func inspectInk(pdf, dir string) string {
+	rd := filepath.Join(dir, "ink")
+	os.MkdirAll(rd, 0o755)
+	defer os.RemoveAll(rd)
+	if _, err := runGS(inspectTimeout, "-dSAFER", "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pamcmyk32", "-r72",
+		"-sOutputFile="+slash(filepath.Join(rd, "p%05d.pam")), slash(pdf)); err != nil {
+		return fmt.Sprintf("⚠️ 總墨量檢查失敗：%v", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(rd, "p*.pam"))
+	sort.Strings(files)
+	var tacPages, richPages []int
+	worst, worstPage := 0, 0
+	limit := tacLimit*255/100 + 2
+	for n, f := range files {
+		b, _ := os.ReadFile(f)
+		if i := bytes.Index(b, []byte("ENDHDR\n")); i >= 0 {
+			b = b[i+7:]
+		}
+		over, rich := false, false
+		for j := 0; j+3 < len(b); j += 4 {
+			c, m, y, k := int(b[j]), int(b[j+1]), int(b[j+2]), int(b[j+3])
+			if t := c + m + y + k; t > limit {
+				over = true
+				if t > worst {
+					worst, worstPage = t, n+1
+				}
+			}
+			// 四色黑：K ≥ 50% 且 C、M、Y 各 ≥ 30%（RGB 黑轉 Japan Color 約 C89 M87 Y82 K78）
+			if k >= 128 && min(c, m, y) >= 77 {
+				rich = true
+			}
+		}
+		if over {
+			tacPages = append(tacPages, n+1)
+		}
+		if rich {
+			richPages = append(richPages, n+1)
+		}
+	}
+	var lines []string
+	if len(tacPages) > 0 {
+		lines = append(lines, fmt.Sprintf("❌ 總墨量超過 %d%%：第 %s 頁（最高 %d%%，在第 %d 頁）。墨量過高容易背印、乾燥不良。",
+			tacLimit, formatPages(tacPages), worst*100/255, worstPage))
+	} else {
+		lines = append(lines, fmt.Sprintf("✅ 總墨量：全部未超過 %d%%。", tacLimit))
+	}
+	if len(richPages) > 0 {
+		lines = append(lines, fmt.Sprintf("⚠️ 四色黑：第 %s 頁有由 C、M、Y、K 混成的黑色。若是文字或細線，套色稍有偏差就會出現彩色毛邊，建議黑字用單色黑 K100；大面積深色底圖可以忽略。", formatPages(richPages)))
+	} else {
+		lines = append(lines, "✅ 四色黑：未發現 C、M、Y、K 混成的黑色。")
+	}
+	return strings.Join(lines, "\n")
+}

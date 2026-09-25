@@ -1,0 +1,79 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestNeutralRewrite(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"0 0 0 rg BT (Hi) Tj ET", "0 g BT (Hi) Tj ET"},
+		{".5 .5 .5 RG 1 w", "0.5 G 1 w"},
+		{"1 0 0 rg", ""}, // 非中性色不動
+		{"(0 0 0 rg) Tj", ""},
+		{"(a\\) 0 0 0 rg) Tj", ""},
+		{"/DeviceRGB cs 0 0 0 sc 1 0 0 sc", "/DeviceRGB cs 0 g /DeviceRGB cs 1 0 0 sc"},
+		{"0 0 0 rg 1 0 0 sc", "0 g /DeviceRGB cs 1 0 0 sc"},
+		{"q 0 0 0 rg Q 1 0 0 sc", "q 0 g Q 1 0 0 sc"}, // Q 還原後不用補設色彩空間
+		{"BI /W 1 /H 1 ID \x00 0 0 0 rg EI 0 0 0 rg", "BI /W 1 /H 1 ID \x00 0 0 0 rg EI 0 g"},
+		{"/DeviceCMYK cs 0 0 0 1 sc", ""},
+		{"0 0 0 rg 0.2 0.2 0.2 RG", "0 g 0.2 G"},
+	} {
+		s := newScan()
+		s.rewrite = true
+		got, _ := s.content([]byte(c.in), nil, &gstate{})
+		if string(got) != c.want {
+			t.Errorf("%q\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
+
+// 端到端：RGB 黑字不做前處理會變四色黑，做了之後不會。需要 Ghostscript。
+func TestCMYKEndToEnd(t *testing.T) {
+	workDir = t.TempDir()
+	initCMYK()
+	if gsPath == "" {
+		t.Skip("沒有 Ghostscript")
+	}
+	ps := filepath.Join(workDir, "t.ps")
+	os.WriteFile(ps, []byte("%!PS\n/Helvetica findfont 72 scalefont setfont\n"+
+		"0 0 0 setrgbcolor 72 600 moveto (BLACK) show\n"+
+		"0 0 0 setrgbcolor 72 450 moveto 500 450 lineto 20 setlinewidth stroke\n"+
+		"0.2 0.4 0.8 setrgbcolor 72 300 moveto (BLUE) show showpage\n"), 0o644)
+	in := filepath.Join(workDir, "in.pdf")
+	if _, err := runGS(time.Minute, "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite", "-sOutputFile="+in, ps); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := scanPDF(in, filepath.Join(workDir, "k.pdf"))
+	if err != nil || !before.Spaces["DeviceRGB"] || before.Changed == 0 {
+		t.Fatalf("前處理：err=%v spaces=%v changed=%d", err, before.Spaces, before.Changed)
+	}
+	convert := func(src string) (string, *scan) {
+		out := strings.TrimSuffix(src, ".pdf") + "_cmyk.pdf"
+		if _, err := runGS(time.Minute, "-dSAFER", "--permit-file-read="+slash(iccDir)+"/", "-dBATCH", "-dNOPAUSE", "-dQUIET",
+			"-sDEVICE=pdfwrite", "-dPDFSETTINGS=/prepress", "-sColorConversionStrategy=CMYK", "-dOverrideICC=true", "-dRenderIntent=1",
+			"-sDefaultRGBProfile="+filepath.Join(iccDir, "sRGB_IEC61966-2-1_no_black_scaling.icc"),
+			"-sOutputICCProfile="+filepath.Join(iccDir, "JapanColor2011Coated.icc"), "-sOutputFile="+out, src); err != nil {
+			t.Fatal(err)
+		}
+		s, err := scanPDF(out, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inspectInk(out, workDir), s
+	}
+
+	ink, after := convert(in)
+	if !strings.Contains(ink, "⚠️ 四色黑") || after.Spaces["DeviceRGB"] {
+		t.Errorf("未前處理應有四色黑且無 RGB：%s %v", ink, after.Spaces)
+	}
+	ink, after = convert(filepath.Join(workDir, "k.pdf"))
+	if !strings.Contains(ink, "✅ 四色黑") || after.Spaces["DeviceRGB"] || !after.Spaces["DeviceCMYK"] {
+		t.Errorf("前處理後不應有四色黑：%s %v", ink, after.Spaces)
+	}
+	t.Log(formatFonts(after.Fonts))
+}

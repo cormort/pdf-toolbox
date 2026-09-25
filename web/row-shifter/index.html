@@ -1,0 +1,2148 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 資料列分頁調整 · PDF Table Row Shifter</title>
+<meta name="description" content="瀏覽器裡直接調整 PDF 表格的分頁位置：把資料列推到下一頁或拉上來，保留原版面、框線與表尾註，再列印或存成 PDF。單一 HTML 檔，檔案不上傳。Adjust where PDF table rows fall across pages, entirely in your browser.">
+<meta name="keywords" content="PDF 表格分頁,PDF 表格編輯,PDF 分頁調整,資料列搬移,跨頁表格,表尾註,框線偵測,對開表,A4 列印,存成 PDF,公文表,pdf.js,PDF table pagination,PDF table editor,row shifter,page break,table footnotes,print to PDF,client-side,offline">
+<meta property="og:title" content="PDF 資料列分頁調整 · PDF Table Row Shifter">
+<meta property="og:description" content="瀏覽器裡直接調整 PDF 表格的分頁位置，不用重排原始文件。單一 HTML 檔，檔案不上傳。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://cormort.github.io/pdf-row-shifter/">
+<link rel="canonical" href="https://cormort.github.io/pdf-row-shifter/">
+<style>
+  /* 介面配色 token：亮色是預設，body.dark 整組換掉。
+     頁面本身（.page 及上面的字、線、標記）一律白底黑字，那是紙，不受主題影響。 */
+  :root{--bg:#f4f4f5;--bar:#fff;--line:#e4e4e7;--ink:#11181c;--dim:#71717a;--acc:#006fee;
+        --fld:#f4f4f5;                    /* HeroUI 的輸入框是填色不是描邊 */
+        --btn:#f4f4f5;--btn-h:#e4e4e7;--btn-a:#d4d4d8;
+        --zone-on:#e6f1fe;--bad:#f31260;
+        --brk-bg:#fffffff2;  /* 頁與頁之間那條分頁列，浮在版面底上 */
+        --pri:#006fee;--pri-h:#005bc4;    /* 列印鈕：實心主色，深色時也是同一支 */
+        --warn:#f5a524;
+        --sw-off:#d4d4d8;                 /* 開關沒開時的滑軌 */
+        --r:12px;--r-sm:8px;--r-lg:14px;
+        --sh:0 0 5px #00000005,0 2px 10px #0000000f;
+        --ctlH:44px;                      /* 工具列實測高度，開機與 resize 時由 syncCtlH() 覆寫 */
+        --ch:32px;                        /* 工具列與側欄所有控制項的統一高度 */
+        --sideW:272px}
+  body.dark{--bg:#000;--bar:#18181b;--line:#27272a;--ink:#ecedee;--dim:#a1a1aa;--acc:#338ef7;
+        --fld:#27272a;--btn:#27272a;--btn-h:#3f3f46;--btn-a:#52525b;
+        --zone-on:#001731;--bad:#ff4d7d;--brk-bg:#18181bf2;
+        --pri:#006fee;--pri-h:#338ef7;--sw-off:#3f3f46;
+        --sh:0 0 5px #0000000d,0 2px 10px #00000040}
+  body{font:13px/1.5 -apple-system,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;margin:0;background:var(--bg);color:var(--ink)}
+  #ctl{position:sticky;top:0;background:var(--bar);padding:7px 14px;z-index:10;border-bottom:1px solid var(--line);
+       box-shadow:var(--sh);display:flex;flex-wrap:wrap;align-items:center;gap:6px 0}
+  /* 工具列分組：同一組貼在一起，組與組之間用細直線隔開。分組是 flex item，
+     換行時整組一起搬，不會出現「組員留在上一行、標題掉到下一行」的孤兒 */
+  #ctl .g{display:flex;align-items:center;gap:5px;padding:0 9px;border-left:1px solid var(--line)}
+  #ctl .g:first-child{border-left:0;padding-left:0}
+  /* 右半邊（狀態＋輸出＋介面工具）綁成一簇：寬度夠就整簇貼右，不夠就整簇換到下一行並靠右，
+     不會拆成「列印留在上一行、語言鈕掉到下一行」 */
+  #ctl .right{display:flex;flex-wrap:wrap;align-items:center;gap:0;margin-left:auto}
+  #ctl .right>.g{border-left:0;padding-left:0}
+  #ctl .right>.g+.g{border-left:1px solid var(--line);padding-left:9px}
+  #ctl label{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--dim)}
+  #ctl input[type=checkbox]{accent-color:var(--acc);margin:0}
+  #ctl input[type=number],#side input[type=number],#ctl input[type=text],#side input[type=text]{
+       font:inherit;height:var(--ch);padding:0 8px;border:0;border-radius:var(--r-sm);background:var(--fld);color:var(--ink);
+       transition:background .15s}
+  /* 數字欄固定寬度：原本用 em 值逐欄指定，標楷體這類寬字型會把值裁掉（13.5 只剩 13.） */
+  #ctl input[type=number],#side input[type=number]{width:5em;padding-right:6px;text-align:right;font-variant-numeric:tabular-nums}
+  #ctl input:hover,#side input:hover,#ctl select:hover,#side select:hover{background:var(--btn-h)}
+  #ctl input:focus-visible,#side input:focus-visible,#ctl select:focus-visible,#side select:focus-visible,
+  button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  /* 原生 file input 的寬度跟著檔名跑，長檔名會把整條工具列撐歪。
+     換成固定寬的標籤按鈕，檔名另外用 #fname 顯示（見下方） */
+  #ctl .filebtn{position:relative;display:inline-flex;align-items:center;height:var(--ch);padding:0 12px;
+       border-radius:var(--r);background:var(--btn);color:var(--ink);font-weight:500;cursor:pointer;transition:background .15s}
+  #ctl .filebtn:hover{background:var(--btn-h)}
+  #ctl .filebtn:focus-within{outline:2px solid var(--acc);outline-offset:2px}
+  #ctl .filebtn input{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;opacity:0;cursor:pointer}
+  #ctl .lbl{color:var(--dim)}
+  #ctl select,#side select{font:inherit;height:var(--ch);padding:0 8px 0 8px;border:0;border-radius:var(--r-sm);
+       background:var(--fld);color:var(--ink);max-width:100%;transition:background .15s}
+  /* 群標題：說明這一組的「操作範圍」，小而淡，不搶控制項 */
+  #ctl .gt{font-size:11px;color:var(--dim);white-space:nowrap}
+  #ctl .lbl b{font-weight:600;color:var(--ink)}
+  /* 目前檔名：只佔一行、太長就截字，滑過去看完整名稱（原生 file input 會把工具列撐歪） */
+  #fname{max-width:11em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim);font-size:12px}
+  #fname:empty{display:none}
+  /* 分段控制項：同性質的按鈕併成一顆，工具列上少掉一排各自為政的方塊 */
+  .sgrp{display:inline-flex;gap:2px;padding:2px;border-radius:var(--r);background:var(--btn)}
+  .sgrp button{height:calc(var(--ch) - 4px);padding:0 11px;background:transparent;border-radius:calc(var(--r) - 3px)}
+  .sgrp button:hover:not(:disabled){background:var(--btn-h)}
+  .sgrp button:active:not(:disabled){transform:none}
+  /* 生效中的那一顆（目前是「符合頁寬／符合頁高／100%」在用） */
+  .sgrp button.on,.sgrp button.on:hover:not(:disabled){background:var(--pri);color:#fff;font-weight:600}
+  /* 編輯文字是「模式」不是選項，開著時整個 label 變橘底，免得使用者忘了自己還在編輯模式 */
+  /* 編輯文字一律上橘底，讓它在工具列裡一眼找得到（不是狀態指示） */
+  /* 要帶 #side：#side label 的特異性比裸 #edLbl 高，不然字色會被 --dim 蓋掉，變灰字壓橘底 */
+  #side #edLbl,#ctl #edLbl{display:inline-flex;align-items:center;gap:6px;height:var(--ch);padding:0 12px;
+       box-sizing:border-box;border-radius:999px;background:var(--warn);color:#11181c;font-weight:600}
+  #side #edLbl input,#ctl #edLbl input{accent-color:#11181c}
+  /* 復原／重做：能按時才上色，灰掉就是沒東西可還原 */
+  #bu:not(:disabled),#br:not(:disabled){color:var(--acc);font-weight:600}
+  #ctl .pri{background:var(--pri);color:#fff;font-weight:600;box-shadow:var(--sh)}
+  #ctl .pri:hover:not(:disabled){background:var(--pri-h);color:#fff}
+  /* 狀態列：佔滿工具列中間的彈性空白，數字用等寬字形，列數跳動時不會左右晃 */
+  #msg{color:var(--dim);font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap;padding-right:6px}
+  #out{padding:14px 0;flex:1;min-width:0}
+  /* 左側設定面板：sticky 而不是改 body 的排版，列印路徑（#out 的文件流）就不用動 */
+  #wrap{display:flex;align-items:flex-start;gap:0}
+  /* min-width:0 是必要的：flex item 預設 min-width:auto，內容的最小寬度會撐住它，收合時縮不掉 */
+  #side{flex:0 0 var(--sideW);width:var(--sideW);min-width:0;box-sizing:border-box;overflow-x:hidden;overflow-y:auto;
+        position:sticky;top:var(--ctlH);max-height:calc(100vh - var(--ctlH));
+        background:var(--bar);border-right:1px solid var(--line);padding:14px}
+  /* 收合直接覆寫實際數值——var 間接引用配上 transition 不會重算 flex-basis／padding */
+  body.sideOff #side{flex-basis:0;width:0;padding:0;border-right:0}
+  body.sideOff #side>*{display:none}
+  /* 一區一個主題，區內每一列都是「左邊說明、右邊控制項」，靠同一條右緣對齊。
+     原本用 flex-wrap 讓每個 label 自己找位置，控制項就散成好幾種縮排 */
+  #side section{display:flex;flex-direction:column;gap:8px;
+                padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid var(--line)}
+  #side section:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}
+  #side h3{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--ink);
+           display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  /* 群標題右邊那行小字說的是這一組「動到什麼範圍」 */
+  #side h3 em{font-style:normal;font-size:11px;font-weight:400;color:var(--dim);text-align:right}
+  #side .r{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+           min-height:var(--ch);color:var(--dim);white-space:nowrap}
+  #side .r>span:first-child{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  /* 一列裡有多個控制項時（上／下邊界）整串靠右排，不跟左邊的說明搶位置 */
+  #side .ctl2{display:inline-flex;align-items:center;gap:4px;color:var(--dim);flex:0 0 auto}
+  /* 命名避開 .row —— 那是頁面上「資料列」的 class，本身是 position:absolute */
+  #side .srow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%}
+  #side .srow>button{flex:1 1 auto}
+  /* 相關的幾列綁成一組，讓 JS 能整組淡掉（例如沒選到線條時的長度／粗細） */
+  #side .grp2{display:flex;flex-direction:column;gap:8px;width:100%}
+  /* 側欄的分段控制項撐滿整個寬度，兩三個選項各佔一半 */
+  #side .sgrp{display:flex}
+  #side .sgrp label{flex:1 1 0;justify-content:center;height:calc(var(--ch) - 4px);color:var(--ink)}
+  #side label{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--dim)}
+  #side input[type=checkbox]:not(.sw),#side input[type=radio]{accent-color:var(--acc);margin:0}
+  #side input[type=text]{background:var(--fld);color:var(--ink)}
+  #side #fq{flex:1 1 auto;min-width:0;text-align:left}
+  #side select{max-width:11em}
+  #side .lbl{color:var(--dim);font-size:11px;line-height:1.5}
+  /* 開關：HeroUI 的 switch 造型。勾選狀態用滑軌顏色表示，比一個小方框好認 */
+  #side .sw{-webkit-appearance:none;appearance:none;position:relative;flex:0 0 auto;width:40px;height:22px;margin:0;
+            border-radius:999px;background:var(--sw-off);cursor:pointer;transition:background .15s}
+  #side .sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;
+            box-shadow:0 1px 3px #0003;transition:transform .15s}
+  #side .sw:checked{background:var(--acc)}
+  #side .sw:checked::after{transform:translateX(18px)}
+  /* 起始畫面：整頁拖曳區，載入成功後才收起（沿用 xls2spread 的做法） */
+  #drop{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:16px;background:var(--bg);color:var(--ink);z-index:20;text-align:center;padding:24px}
+  #drop.hide{display:none}
+  /* 首頁底色就是 --btn，按鈕得靠面板底色＋描邊才看得出來 */
+  #blang2{position:absolute;top:16px;right:16px;background:var(--bar);border:1px solid var(--line);box-shadow:var(--sh)}
+  #zone{border:2px dashed var(--line);border-radius:var(--r-lg);padding:44px 56px;transition:.15s;cursor:pointer;max-width:620px;
+        background:var(--bar);box-shadow:var(--sh)}
+  #zone.on{border-color:var(--acc);background:var(--zone-on)}
+  #zone svg{display:block;margin:0 auto 14px;color:var(--acc)}
+  #zone h1{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-.01em}
+  #zone p{margin:0;font-size:13px;color:var(--dim);line-height:1.7}
+  #zone .pick{margin-bottom:18px}
+  #zone b{color:var(--ink)}
+  /* 正文說明與「不適用」警語中間拉一條線，兩件事不要黏在一起看 */
+  #zone .feat{margin-top:2px;padding-top:16px;border-top:1px solid var(--line);line-height:1.9}
+  #zone .lim{margin-top:12px;font-size:12px;color:var(--warn)}
+  #err{color:var(--dim);font-size:13px;white-space:pre-wrap;min-height:18px}
+  #err.bad{color:var(--bad)}
+  #drop small{color:var(--dim);font-size:12px;max-width:620px;line-height:1.8}
+  /* contain:paint 是必要的：對開時內層有兩頁寬，只用 overflow:hidden 列印仍會被算進版面寬度，
+     Chrome 就會把整份文件縮小以「符合寬度」，印出來變一半大小 */
+  /* 頁面內文字要純黑，不能吃 body 的 --ink 深灰，否則轉出的 PDF 比原檔淺 */
+  .page{background:#fff;color:#000;box-shadow:0 0 5px #0000000a,0 4px 14px #00000026;position:relative;overflow:hidden;contain:paint;flex:none}
+  /* 一版＝一張紙（對開時左右兩張）＋底下的分頁列。寬度取「內容」與「#out」的較大者，
+     分頁列才會對齊紙張的中心，而不是對齊 #out 的中心 */
+  .blk{width:fit-content;min-width:100%}
+  /* safe center：視窗塞不下（對開時常見）就改成靠左，否則置中會把左半頁推到 x<0，
+     那塊捲不回來也看不到。溢出的右側交給整頁的橫向捲軸 */
+  /* 寬度交給外面的 .blk 撐：這裡留 width:auto，紙比 #out 寬時才撐得開 .blk */
+  /* 下緣只留 5px：分頁列是「上面這一頁」的工具列，要貼著它的紙，不能看起來像下一頁的 */
+  .sheet{display:flex;gap:4px;justify-content:safe center;margin-bottom:5px}
+  /* 分頁列歸屬的兩個線索：貼著上面那張紙、上方一個指上去的尖角。
+     第三個線索在下面的 @media screen：滑過工具列時把上面那張紙框起來 */
+  .blk>.brk::before{content:"";position:absolute;top:-5px;left:50%;margin-left:-5px;width:9px;height:9px;
+       background:var(--brk-bg);border-left:1px solid var(--line);border-top:1px solid var(--line);
+       border-top-left-radius:2px;transform:rotate(45deg)}
+  /* 原檔中文多為微軟正黑、數字多為 Times New Roman，分開對應才不會整份變同一種字 */
+  :root{--serif:"Times New Roman",Times,serif}
+  .seg,.row{position:absolute;white-space:pre;font-family:"微軟正黑體","Microsoft JhengHei","PingFang TC","Heiti TC",sans-serif}
+  .row{cursor:grab}
+  .row:hover{outline:1px dashed #4285f4;background:#e8f0fe80}
+  .row.sel{background:#fff3cd}
+  .row.grp{box-shadow:inset 2px 0 0 #34a853}
+  .seg[data-p]{cursor:text}
+  body.edit .row{cursor:default}
+  body.edit .row:hover{outline:none;background:none}
+  body.edit .seg[data-p]:hover{outline:1px dotted #4285f4;background:#e8f0fe}
+  .seg.editing{outline:1px solid #4285f4;background:#fff;z-index:5;min-width:1em}
+  .seg.pick{outline:1px solid #ea4335;background:#fce8e6;z-index:4}
+  @media print{.seg.pick{outline:none;background:none}}
+  @media print{.row.sel{background:none}.row.grp{box-shadow:none}}
+  .ln{position:absolute;background:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  /* 自由編輯：文字方塊與線條都是獨立物件，可搬可改；兩類靠「選取對象」互斥，免得誤點 */
+  body.free .row,body.free .gd{display:none}
+  body.free .seg,body.free .ln{cursor:move}
+  body.free .ln::after{content:"";position:absolute;inset:-3px}   /* 線只有 1px，命中範圍要放大才點得到 */
+  body.free.cat-t .ln{pointer-events:none}
+  body.free.cat-l .seg{pointer-events:none}
+  body.free .seg:hover,body.free .ln:hover{outline:1px dotted #4285f4}
+  #band{position:fixed;border:1px solid #ea4335;background:#ea433522;pointer-events:none;z-index:9}
+  /* 檢查標記：只在畫面上，列印不出現 */
+  body.chk .ovl{outline:1.5px solid #ea4335;background:#fdd8d5}
+  body.chk .wht{outline:1.5px dashed #9334e6;background:#f3e8fd}
+  @media print{.ovl,.wht{outline:none!important;background:none!important}}
+  .hit{background:#fff3a3}
+  .cur{background:#ffd54a;outline:1px solid #f59e0b;z-index:6}
+  @media print{.hit,.cur{background:none;outline:none}}
+  .fsel{outline:1px solid #ea4335!important;outline-offset:1px;background:#fce8e6cc}
+  @media print{.fsel,body.free .seg,body.free .ln{outline:none!important;background:none}
+                body.free .ln{background:#000}}
+  /* 選擇器要帶 #ctl／#side：#ctl label 與 #side section 都含 id，特異性比裸 .tbl 高 */
+  body.free #ctl .tbl,body.free #side .tbl,body:not(.free) #freeG,body.free #fnAllLbl{display:none}
+  .gd{position:absolute;left:0;width:100%;border-top:1px dashed #ea4335;pointer-events:none}
+  @media print{.gd{display:none}}
+  /* 分頁列：夾在兩張紙中間，是這個工具最常操作的地方，所以資訊照「決策順序」排——
+     第幾頁／這頁幾列 → 推、拉 → 平均列高 → 鎖定 */
+  .brk{position:relative;display:flex;flex-wrap:wrap;gap:7px 11px;justify-content:center;align-items:center;color:var(--dim);font-size:14px;
+       margin:0 auto 18px;padding:7px 15px;width:fit-content;max-width:calc(100vw - 34px);background:var(--brk-bg);border:1px solid var(--line);
+       border-radius:999px;box-shadow:var(--sh);backdrop-filter:blur(8px)}
+  /* 滑到分頁列的任一顆控制項上，就把「上面那一頁」框起來——直接指出這排按鈕在動誰。
+     只在畫面上生效；列印沒有 hover，也不會把框線印出去 */
+  @media screen{
+    .blk:has(.brk:hover)>.sheet>.page,.blk:has(.brk:focus-within)>.sheet>.page{
+      box-shadow:0 0 0 2px var(--acc),0 4px 14px #00000026}
+    /* 尖角跟著變色，把「工具列 → 上面那頁」連成一條線索 */
+    .blk:has(.brk:hover)>.brk::before,.blk:has(.brk:focus-within)>.brk::before{
+      background:var(--acc);border-color:var(--acc)}
+  }
+  .brk b{color:var(--ink);font-weight:600}
+  .brk .sub{display:inline-flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums}
+  .brk .sub b{min-width:3.4em;text-align:right}      /* 加減註起始時數字不會左右跳 */
+  .brk .sep{width:1px;height:18px;background:var(--line)}
+  .brk label{display:inline-flex;align-items:center;gap:4px}
+  .brk input[type=checkbox]{accent-color:var(--acc);margin:0}
+  /* 分頁列浮在紙上，按鈕比工具列小一號，但字要看得清楚（這是最常按的一排） */
+  .brk button{height:30px;padding:0 12px;border-radius:999px;font-size:14px}
+  .brk button.bico{width:auto;padding:0 12px;background:var(--btn)}
+  /* 推／拉是主流程：實心主色，跟旁邊的次要控制項拉開 */
+  .brk button.bpri{background:var(--pri);color:#fff;font-weight:600;padding:0 12px}
+  .brk button.bpri:hover:not(:disabled){background:var(--pri-h)}
+  /* 控制項統一高度與內距：工具列、側欄、對話框看起來才是同一套元件 */
+  button{font:inherit;font-weight:500;height:var(--ch);padding:0 11px;border:0;border-radius:var(--r);background:var(--btn);
+         color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;
+         transition:background .15s,transform .1s,opacity .15s}
+  button:hover:not(:disabled){background:var(--btn-h)}
+  button:active:not(:disabled){background:var(--btn-a);transform:scale(.97)}
+  button:disabled{opacity:.5;cursor:default}
+  /* 窄視窗先把檔名讓掉，工具列就不會提早換行（檔名是唯一「長度不可控」的東西） */
+  @media (max-width:1180px){#fname{max-width:9em}}
+  @media (max-width:1020px){#fname{display:none}}
+  @media (max-width:720px){#ctl{padding:7px 10px}#ctl .g{padding:0 7px}}
+  @media print{
+    @page{margin:0}   /* 實際紙張尺寸由 load() 依來源 PDF 動態寫入 #pagesize */
+    body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    #ctl,#side,.brk,#drop{display:none}
+    #wrap{display:block}
+    #out{zoom:1}                       /* 畫面縮放只是預覽，印出來一律原尺寸 */
+    /* 這裡少一項就會每頁多吐一張空白紙：頁面盒剛好等於 A4，外圍任何留白都會溢位 */
+    html,body,#out{width:auto;padding:0;margin:0;overflow:hidden}
+    .blk{display:block;width:auto;min-width:0;margin:0;padding:0}   /* 畫面上的 fit-content 不能帶進列印 */
+    .sheet{display:block;gap:0;margin:0;padding:0;width:auto}   /* 畫面用的置中不能帶進列印，會撐寬版面 */
+    .page{box-shadow:none;margin:0;break-after:page;break-inside:avoid}
+    .blk:last-child .sheet .page:last-child{break-after:avoid}   /* 不然結尾會多一張空白頁 */
+  }
+</style>
+
+<style id="pagesize"></style>
+
+<!-- 工具列左→右：檔案與模式 → 編輯 → 檢視 →（彈性空白）→ 狀態 → 輸出 → 介面工具 -->
+<div id="ctl">
+  <span class="g">
+    <label class="filebtn" title="開啟 PDF，或拖回自由編輯的 .json 存檔。檔案不會上傳">
+      <input type="file" id="f" accept="application/pdf,.json">開啟檔案</label>
+    <span id="fname" class="dyn"></span>
+    <label class="tbl" title="跳過前面的封面／目次，從這一頁開始讀">起始頁<input type="number" id="fromPg" value="1" min="1" step="1"></label>
+    <label class="tbl"><input type="checkbox" id="spread"> 對開表</label>
+    <label id="freeLbl" title="不分列不分頁，整份原樣攤開，只搬移／編輯文字方塊與線條"><input type="checkbox" id="freeMode"> 自由編輯</label>
+  </span>
+  <span class="g tbl">
+    <span class="gt">編輯</span>
+    <button id="bu" class="dyn" onclick="undo()" title="復原 (⌘Z)">↩ 復原</button>
+    <button id="br" class="dyn" onclick="redo()" title="重做 (⇧⌘Z)">↪ 重做</button>
+  </span>
+  <span class="g">
+    <span class="gt">檢視</span>
+    <span class="sgrp">
+      <button onclick="fit('w')" data-fit="w" title="縮放到符合頁寬（對開表算左右兩頁的總寬）">符合頁寬</button>
+      <button onclick="fit('h')" data-fit="h" title="縮放到一頁的高度剛好塞進視窗">符合頁高</button>
+      <button onclick="fit(0)" data-fit="0" title="回到原尺寸">100%</button>
+    </span>
+  </span>
+  <span class="right">
+    <span id="msg" class="dyn"></span>
+    <span class="g">
+      <button class="pri" onclick="doPrint()">列印 / 存成 PDF</button>
+    </span>
+    <span class="g">
+      <button id="blang" title="Switch interface language / 切換介面語言">EN</button>
+      <button id="btheme" class="dyn" title="切換亮色／深色介面（只影響工具列與面板，頁面本身一律白底）">☀ 亮色</button>
+      <button id="sideTog" class="dyn" title="收合／展開左側設定面板">◀ 設定</button>
+    </span>
+  </span>
+</div>
+
+<div id="wrap">
+  <aside id="side">
+    <section class="tbl">
+      <h3>版面<em>整份套用</em></h3>
+      <label class="r" title="表身上方留白，避免字壓到天線">上邊界<span class="ctl2"><input type="number" id="padT" value="2" min="0" max="60" step="1">pt</span></label>
+      <label class="r" title="表身下方留白，避免字壓到地線">下邊界<span class="ctl2"><input type="number" id="padB" value="2" min="0" max="60" step="1">pt</span></label>
+      <label class="r" title="列高再怎麼壓縮都不低於這個值">最小列高<span class="ctl2"><input type="number" id="minLh" value="0" min="0" max="60" step="0.5">pt</span></label>
+      <label class="r" title="列高被拉開時，文字落在上下兩列的中間，而不是貼著自己那條基線">文字置中<input type="checkbox" id="vmid" class="sw" checked></label>
+      <label class="r" title="最後一頁列不滿時，尾端的合計／總計列沉到地線上方，中間留白（預設開：末頁的地線由表尾註決定，合計列就貼在那條線上方）">合計貼地線<input type="checkbox" id="sink" class="sw" checked></label>
+      <label class="r" title="合計／總計列離地線留多少（預設＝半個列高；0＝只留「下邊界」）">合計離地線<span class="ctl2"><input type="number" id="sinkGap" value="0" min="0" max="60" step="1">pt</span></label>
+      <label class="r" id="fnAllLbl" title="整份套用同一個字型，Windows／Mac 看到的結果就一致；「（原樣）」＝每個字保留原檔字型">整份字型<select id="fnAll"></select></label>
+    </section>
+    <section class="tbl">
+      <h3>分頁<em>整份套用</em></h3>
+      <button id="avgAll" class="dyn" title="所有頁面的列都平均分佈到表身底端">平均列高：全部頁面</button>
+      <span class="srow">
+        <button id="freeze" title="把目前每一個分頁點都鎖起來，之後不會被推拉動到">🔒 凍結分頁</button>
+        <button id="unfreeze" title="解開所有鎖定的分頁點（分頁位置不變）">🔓 清除鎖定</button>
+      </span>
+    </section>
+    <section class="tbl">
+      <h3>選取的列<em>先在頁面上點選</em></h3>
+      <span class="srow">
+        <button onclick="group()" title="把選取的連續列綁成一組，分頁不會拆開">組成群組</button>
+        <button onclick="ungroup()" title="解除選取列的群組">解除群組</button>
+      </span>
+      <span class="srow">
+        <button onclick="sel.clear();render()" title="取消目前的列選取">取消選取</button>
+        <label id="edLbl" title="點格子直接改字"><input type="checkbox" id="editMode"> 編輯文字</label>
+      </span>
+    </section>
+    <section id="alignG" title="表格模式：按住修飾鍵點格子選取；自由編輯：直接選文字方塊。再按對齊鈕">
+      <h3>對齊<em class="tbl"><b id="kAlt">Alt</b>＋點選格子</em></h3>
+      <span class="srow">
+        <button onclick="align('l')" title="靠左對齊">靠左</button>
+        <button onclick="align('c')" title="水平置中">置中</button>
+        <button onclick="align('r')" title="靠右對齊">靠右</button>
+      </span>
+      <span class="srow">
+        <button onclick="align('d')" title="水平均分，字與字的間隔一樣寬">均分</button>
+        <button onclick="align('col')" title="依欄線置中">依欄線</button>
+      </span>
+    </section>
+    <section id="freeG">
+      <h3>自由編輯<em>選取的物件</em></h3>
+      <span class="sgrp">
+        <label><input type="radio" name="cat" value="t" checked> 文字方塊</label>
+        <label><input type="radio" name="cat" value="l"> 線條</label>
+      </span>
+      <label class="r" id="fnEd" title="選到文字方塊才能改"><span>字型</span><select id="fontSel"></select></label>
+      <!-- 兩個欄位各自一列：#lnEd 只當外框讓 JS 能整組淡掉，實際欄位是裡面那兩列 -->
+      <span class="grp2" id="lnEd" title="選到線條才能改">
+        <label class="r"><span>線 長</span><span class="ctl2"><input type="number" id="lnLen" step="0.5">pt</span></label>
+        <label class="r"><span>粗</span><span class="ctl2"><input type="number" id="lnTh" step="0.25" min="0.25">pt</span></label>
+      </span>
+      <span class="srow">
+        <button onclick="alignLine(0)" title="選取的線拉到同一個起點（左端／上端），另一端不動">齊頭</button>
+        <button onclick="alignLine(1)" title="選取的線拉到同一個終點（右端／下端），另一端不動">齊尾</button>
+        <button id="delObj" title="刪除選取物件（Delete）">刪除</button>
+      </span>
+      <span class="srow">
+        <button onclick="fundoF()" id="fbu" title="復原">↩ 復原</button>
+        <button onclick="fredoF()" id="fbr" title="重做">↪ 重做</button>
+        <button onclick="saveFree()" title="把目前的自由編輯結果存成 .json，之後拖回來就能接著改（不需要原始 PDF）">存檔</button>
+      </span>
+      <span class="lbl">拖曳搬移・線兩端可拉長度・雙擊改字・方向鍵微調（Shift 大步）</span>
+    </section>
+    <section>
+      <h3>畫面<em>不會印出來</em></h3>
+      <label class="r tbl" title="畫出表身上下界（只在畫面上，不會印出來）">輔助線<input type="checkbox" id="guide" class="sw" checked></label>
+      <span class="srow">
+        <input id="fq" type="text" placeholder="搜尋文字">
+        <button onclick="step(-1)" title="上一個 (Shift+Enter)">‹</button>
+        <button onclick="step(1)" title="下一個 (Enter)">›</button>
+      </span>
+      <span class="lbl dyn" id="fmsg"></span>
+      <button id="chkB" onclick="chk()" title="標出被線壓到的字，以及原檔是白字／極淡字（印出來不會有標記）">檢查</button>
+      <label class="r" title="字框先往內縮這麼多才判定壓線；調大只留下壓得深的">容許<span class="ctl2"><input type="number" id="ovTol" value="0.5" min="0" max="6" step="0.25">pt</span></label>
+      <label class="r" title="原檔填色亮度 ≥ 此值就算白字（255＝純白）；調低會連淺灰字一起抓">白字門檻<span class="ctl2"><input type="number" id="whThr" value="230" min="128" max="255" step="5"></span></label>
+      <span class="lbl dyn" id="cmsg"></span>
+      <button id="diagB" title="把這份檔的結構統計（頁數、紙張、框線條數、列數…）複製起來，貼進回報用。只有數字，不含檔案內容">複製診斷資訊</button>
+    </section>
+  </aside>
+  <div id="out"></div>
+</div>
+
+<div id="drop">
+  <button id="blang2" class="dyn" title="Switch interface language / 切換介面語言">EN</button>
+  <div id="zone" title="用途：調整單一張連續表格的分頁——哪幾列落在哪一頁。
+不適用：整本 10-K、年報、報告書這種多節文件（沒有單一張表可分，會被攤成幾千個無意義的「列」）。
+需要：文字型 PDF（掃描檔沒有文字圖層）。表格最好有橫貫全寬的天地線；沒有框線的純文字文件也能開，邊界改由內容決定。">
+    <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
+      <path d="M14 3v5h5"/><path d="M12 11.5v6"/><path d="M9.5 15 12 17.5 14.5 15"/>
+    </svg>
+    <h1>把 PDF 拖進來</h1>
+    <p class="pick">或<b>點這裡選檔案</b></p>
+    <p class="feat"><b>調整單一張連續表格的分頁</b>——只改哪幾列落在哪一頁，版面不動<br>天地線、欄線、頁首、字型與框線粗細全部從原檔讀出來</p>
+    <p class="lim">整本 10-K、年報這類多節文件不適用</p>
+  </div>
+  <div id="err"></div>
+  <small>只吃文字型 PDF，掃描檔沒有文字圖層。表格需有橫貫全寬的天地線；無框線的純文字文件也可以，邊界改由內容決定。自由編輯的 .json 存檔也可以拖進來。<br>
+  檔案不會上傳，全部在你這台電腦的瀏覽器裡處理。</small>
+</div>
+
+<script src="/vendor/pdfjs-3.11.174/pdf.min.js"></script>
+<script>
+// ── 介面語言 ─────────────────────────────────────────────────
+// 靜態文字用字典整批換（原文留在 Map／dataset，切回中文時還原）；
+// JS 產生的字串用 T(中,英)。class="dyn" 的元素由 dynLabels() 自己管，字典不碰。
+const LANG_KEY='prs:lang';
+let LANG='zh'; try{ LANG=localStorage.getItem(LANG_KEY)==='en'?'en':'zh'; }catch(e){}
+const T=(zh,en)=>LANG==='en'?en:zh;
+const EN={"跳過前面的封面／目次，從這一頁開始讀": "Skip the cover / table of contents and start reading from this page","不分列不分頁，整份原樣攤開，只搬移／編輯文字方塊與線條": "No rows, no pagination — the whole document laid out as-is; just move and edit text boxes and lines","縮放到符合頁寬（對開表算左右兩頁的總寬）": "Zoom to fit page width (spreads count both halves)","縮放到一頁的高度剛好塞進視窗": "Zoom so one page fits the window height","回到原尺寸": "Back to 100%","切換亮色／深色介面（只影響工具列與面板，頁面本身一律白底）": "Toggle light / dark UI (toolbar and panel only — pages stay white)","收合／展開左側設定面板": "Collapse / expand the settings panel","表身上下留白，避免字壓到天地線": "Padding above and below the table body so text does not touch the top/bottom rules","列高再怎麼壓縮都不低於這個值": "Row height never compresses below this value","列高被拉開時，文字落在上下兩列的中間，而不是貼著自己那條基線": "When rows are spread out, centre the text between rows instead of sitting on its own baseline","最後一頁列不滿時，尾端的合計／總計列沉到地線上方，中間留白（預設開：末頁的地線由表尾註決定，合計列就貼在那條線上方）": "When the last page is not full, sink the trailing total rows onto the bottom rule and leave the gap in the middle (on by default: the last page's rule comes from the footnote block, so the total rows end up just above it)","整份套用同一個字型，Windows／Mac 看到的結果就一致；「（原樣）」＝每個字保留原檔字型": "Apply one font to the whole document so Windows and Mac match; \"(as-is)\" keeps each glyph’s original font","所有頁面的列都平均分佈到表身底端": "Spread rows evenly down to the bottom of the table body on every page","把目前每一個分頁點都鎖起來，之後不會被推拉動到": "Lock every current page break so later pushes and pulls cannot move it","解開所有鎖定的分頁點（分頁位置不變）": "Unlock all locked page breaks (positions stay put)","表尾註第一列距地線多遠（只影響註，與上下邊界無關）": "Distance from the bottom rule to the first footnote line (footnotes only, unrelated to margins)","把改過字的表尾註那一條重新斷行（沒改過的一字不動，連原檔的行尾都留著）；對開表會跨兩張紙接排": "Re-wrap the footnote items whose text you edited (untouched ones stay exactly as in the source); spreads flow across both sheets","把選取的連續列綁成一組，分頁不會拆開": "Bind the selected consecutive rows into one group so a page break cannot split them","解除選取列的群組": "Ungroup the selected rows","取消目前的列選取": "Clear the current row selection","點格子直接改字": "Click a cell to edit its text","表格模式：按住修飾鍵點格子選取；自由編輯：直接選文字方塊。再按對齊鈕": "Table mode: hold the modifier key and click cells; free edit: select text boxes directly. Then press an align button","靠左對齊": "Align left","水平置中": "Centre horizontally","靠右對齊": "Align right","水平均分": "Distribute horizontally","依欄線置中": "Centre between column rules","選到文字方塊才能改": "Available when a text box is selected","選到線條才能改": "Available when a line is selected","選取的線拉到同一個起點（左端／上端），另一端不動": "Move the selected lines to a common start (left / top); the other end stays","選取的線拉到同一個終點（右端／下端），另一端不動": "Move the selected lines to a common end (right / bottom); the other end stays","刪除選取物件（Delete）": "Delete the selected objects (Delete)","復原": "Undo","重做": "Redo","把目前的自由編輯結果存成 .json，之後拖回來就能接著改（不需要原始 PDF）": "Save the current free-edit result as .json; drop it back in later to keep editing (no original PDF needed)","畫出表身上下界（只在畫面上，不會印出來）": "Draw the table body bounds on screen only (never printed)","搜尋文字": "Find text","上一個 (Shift+Enter)": "Previous (Shift+Enter)","下一個 (Enter)": "Next (Enter)","標出被線壓到的字，以及原檔是白字／極淡字（印出來不會有標記）": "Mark glyphs clipped by rules, and text that is white / near-white in the source (marks are not printed)","字框先往內縮這麼多才判定壓線；調大只留下壓得深的": "Shrink the glyph box by this much before testing for clipping; raise it to keep only deep overlaps","原檔填色亮度 ≥ 此值就算白字（255＝純白）；調低會連淺灰字一起抓": "Source fill brightness at or above this counts as white text (255 = pure white); lower it to catch light grey too","檔案": "File","起始頁": "Start page","對開表": "Spread","自由編輯": "Free edit","檢視": "View","符合頁寬": "Fit width","符合頁高": "Fit height","列印 / 存成 PDF": "Print / Save as PDF","版面": "Layout","整份套用": "whole document","邊界 上": "Margin top","下": "bottom","最小列高": "Min row height","文字置中": "Centre text","合計貼地線": "Sink totals to bottom rule","整份字型": "Document font","分頁": "Pagination","🔒 凍結分頁": "🔒 Freeze breaks","🔓 清除鎖定": "🔓 Clear locks","表尾註": "Footnotes","註起始": "Note offset","重排備註": "Re-wrap notes","選取的列": "Selected rows","先在頁面上點選": "click on the page first","組成群組": "Group","解除群組": "Ungroup","取消選取": "Clear selection","編輯文字": "Edit text","對齊": "Align","＋點選格子": " + click cells","選取的物件": "selected objects","文字方塊": "Text box","線條": "Line","字型": "Font","線 長": "Line length","粗": "width","齊頭": "Align starts","齊尾": "Align ends","刪除": "Delete","存檔": "Save","拖曳搬移・線兩端可拉長度・雙擊改字・方向鍵微調（Shift 大步）": "Drag to move · drag a line end to resize · double-click to edit · arrow keys nudge (Shift = bigger step)","複製診斷資訊": "Copy diagnostics", "把這份檔的結構統計（頁數、紙張、框線條數、列數…）複製起來，貼進回報用。只有數字，不含檔案內容": "Copies this file's structural stats (pages, paper size, rule counts, row counts…) for a bug report. Numbers only — no document content", "畫面": "Screen","不會印出來": "not printed","輔助線": "Guides","檢查": "Check","容許": "Tolerance","白字門檻": "White threshold","把 PDF 拖進來": "Drop a PDF here", "調整單一張連續表格的分頁": "Repaginate one continuous table", "——只改哪幾列落在哪一頁，版面不動": " — only which rows land on which page changes; the layout does not", "整本 10-K、年報這類多節文件不適用": "Not for whole 10-Ks, annual reports or other multi-section documents", "用途：調整單一張連續表格的分頁——哪幾列落在哪一頁。\n不適用：整本 10-K、年報、報告書這種多節文件（沒有單一張表可分，會被攤成幾千個無意義的「列」）。\n需要：文字型 PDF（掃描檔沒有文字圖層）。表格最好有橫貫全寬的天地線；沒有框線的純文字文件也能開，邊界改由內容決定。": "What it is for: repaginating one continuous table — which rows land on which page.\nWhat it is not for: a whole 10-K, annual report or other multi-section document (there is no single table to repaginate; it flattens into thousands of meaningless rows).\nWhat it needs: a text-based PDF (scans have no text layer). The table should ideally have full-width top and bottom rules; borderless plain-text documents also open, with bounds taken from the content.","或": "or ","點這裡選檔案": "click to choose a file","天地線、欄線、頁首、字型與框線粗細全部從原檔讀出來": "Top/bottom rules, column rules, headers, fonts and line widths all come from the source file","只調整資料列落在哪一頁，版面不動": "Only which page each row lands on changes — the layout does not","只吃文字型 PDF，掃描檔沒有文字圖層。表格需有橫貫全寬的天地線；無框線的純文字文件也可以，邊界改由內容決定。自由編輯的 .json 存檔也可以拖進來。": "Text-based PDFs only — scans have no text layer. Tables need full-width top and bottom rules; borderless plain-text documents also work, with bounds taken from the content. Free-edit .json saves can be dropped in too.","檔案不會上傳，全部在你這台電腦的瀏覽器裡處理。": "Nothing is uploaded — everything runs in the browser on your own machine.",
+"開啟檔案": "Open file","開啟 PDF，或拖回自由編輯的 .json 存檔。檔案不會上傳": "Open a PDF, or drop a free-edit .json save back in. Nothing is uploaded",
+"上邊界": "Top margin","下邊界": "Bottom margin",
+"表身上方留白，避免字壓到天線": "Padding above the table body so text does not touch the top rule",
+"表身下方留白，避免字壓到地線": "Padding below the table body so text does not touch the bottom rule",
+"靠左": "Left","置中": "Centre","靠右": "Right","均分": "Even","依欄線": "By column",
+"水平均分，字與字的間隔一樣寬": "Spread the characters out evenly, with equal gaps",
+"編輯": "Edit","↩ 復原": "↩ Undo","↪ 重做": "↪ Redo",
+"合計離地線": "Gap above rule",
+"合計／總計列離地線留多少（預設＝半個列高；0＝只留「下邊界」）": "How far the total rows stay above the bottom rule (default: half a row height; 0 = the bottom margin only)",
+"表尾註整段往上移 1pt（地線跟著往上收）": "Move the whole footnote block up 1pt (the bottom rule follows)",
+"表尾註整段往下移 1pt（地線跟著往下放）": "Move the whole footnote block down 1pt (the bottom rule follows)"};
+const origText=new Map();
+const tr = s => { const t=s.trim(); const e=EN[t]; return t&&e!==undefined ? s.replace(t,e) : s; };
+function applyLang(){
+  document.documentElement.lang = LANG==='en'?'en':'zh-Hant';
+  for(const root of [ctl,side,drop]){
+    const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+    for(let n; n=w.nextNode();){
+      if(n.parentElement.closest('.dyn')) continue;
+      if(!origText.has(n)) origText.set(n,n.nodeValue);
+      n.nodeValue = LANG==='en' ? tr(origText.get(n)) : origText.get(n);
+    }
+    root.querySelectorAll('[title],[placeholder]').forEach(el=>{
+      if(el.closest('.dyn')) return;
+      for(const a of ['title','placeholder']){
+        if(!el.hasAttribute(a)) continue;
+        const k='o'+a;
+        if(el.dataset[k]==null) el.dataset[k]=el.getAttribute(a);
+        el.setAttribute(a, LANG==='en'?tr(el.dataset[k]):el.dataset[k]);
+      }
+    });
+  }
+  blang.textContent = blang2.textContent = LANG==='en' ? '中文' : 'EN';
+}
+
+const U=pdfjsLib; U.GlobalWorkerOptions.workerSrc='/vendor/pdfjs-3.11.174/pdf.worker.min.js';
+
+// 按鍵標示依平台換：Mac 用 ⌘/⌥，Windows、Linux 用 Ctrl/Alt
+const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent);
+const KMOD=MAC?'⌘':'Ctrl', KALT=MAC?'⌥':'Alt';
+kAlt.textContent=KALT;
+function dynLabels(){
+  bu.title=T('復原','Undo')+` (${KMOD}Z)`;
+  br.title=T('重做','Redo')+` (${MAC?'⇧⌘Z':'Ctrl+Shift+Z'})`;
+  bu.textContent=T('↩ 復原','↩ Undo'); br.textContent=T('↪ 重做','↪ Redo');
+  setTheme(document.body.classList.contains('dark'));
+  sideTog.textContent=T(document.body.classList.contains('sideOff')?'▶ 設定':'◀ 設定',
+                        document.body.classList.contains('sideOff')?'▶ Settings':'◀ Settings');
+  fillFonts();
+  units.length ? render() : status();
+}
+blang.onclick=blang2.onclick=ev=>{ ev.stopPropagation();   // 首頁那顆在拖曳區裡，點它不要順便開檔案對話框
+  LANG=LANG==='en'?'zh':'en';
+  try{ localStorage.setItem(LANG_KEY,LANG); }catch(e){}
+  applyLang(); dynLabels(); };
+
+// 版面（固定，不隨資料跑）：W/H 頁面尺寸、frame 天地線與欄線、head 固定頁首、bodyTop/LH 表身格線
+// units[i] = 一個可搬動單位（1 列，或群組後的多列）；breaks 以 unit 為索引
+let minLH=0;
+const avgPg=new Set();        // 要平均列高的頁（非最後一頁本來就是平均的）
+const locks=new Set();        // 鎖住的分頁點，以「第幾個 unit 之後斷頁」記，不受其他頁增減影響
+let W=595,pageW=595,H=842, frame=[], frames=[], head=[], note=[], noteSrc=[], rows=[], units=[], breaks=[], PADT=2, PADB=2, NOTEY=0, SINKGAP=0, sinkGapTouched=false, topY=0, bodyTop=0, bodyBot=800, bottomY=800, pgBots=[], fillY=800, LH=7, perPage=1;
+// 這份是非表格型（純文字內文）嗎：決定 render() 要等高排列還是保留原檔列距
+let noFrameDoc=false, mixedSize=0, loadWarn=[];
+const sel=new Set();
+
+let buf=null;
+// load() 中間有多個 await，連續換檔／切對開會兩份同時跑、互相蓋掉全域狀態（列數、行高全亂）。
+// 排隊跑，最後一次的結果就是畫面上的結果。
+let loading=Promise.resolve();
+const queueLoad=()=>{ loading=loading.then(load, load).catch(e=>{ console.error(e); fail(T('讀不到這個 PDF：','Could not read this PDF: ')+(e.message||e)); }); };
+// 失敗就退回起始畫面，把原因寫在拖曳區下方（比 alert 好找，也還留在可以再拖一次的地方）
+const fail = m => { err.textContent=m; err.classList.add('bad'); drop.classList.remove('hide'); out.innerHTML=''; };
+f.onchange = e => { take(e.target.files[0]); };
+
+// ── 起始畫面的拖曳區：載入成功才收起，失敗留在原地顯示原因 ──
+const take = file => {
+  if(!file) return;
+  // 檔名顯示在「開啟檔案」右邊。原生 file input 的寬度會跟著檔名跑，長檔名會把工具列撐歪，
+  // 所以檔名自己一格、太長就截字，完整名稱留在 title
+  fname.textContent = file.name; fname.title = file.name;
+  if(/\.json$/i.test(file.name)) return loadSaved(file);          // 自由編輯的存檔
+  if(!/\.pdf$/i.test(file.name)){ err.classList.add('bad'); return err.textContent=T(`「${file.name}」不是 PDF 或自由編輯存檔（.json）`,`"${file.name}" is not a PDF or a free-edit save (.json)`); }
+  // 大檔要跑好幾秒（260 頁實測 6.4s），沒回饋會像當掉。成功時 drop 收起、失敗時 fail() 覆寫
+  err.classList.remove('bad'); err.textContent=T(`讀取中…（${file.name}）`,`Loading… (${file.name})`); buf=file; queueLoad();
+};
+zone.onclick = () => f.click();
+drop.ondragover = e => { e.preventDefault(); zone.classList.add('on'); };
+drop.ondragleave = () => zone.classList.remove('on');
+drop.ondrop = e => { e.preventDefault(); zone.classList.remove('on'); take(e.dataTransfer.files[0]); };
+// 拖到視窗其他地方不要讓瀏覽器直接開啟檔案
+addEventListener('dragover', e=>e.preventDefault());
+addEventListener('drop', e=>e.preventDefault());
+// 切換對開要重新解析原檔，推拉／群組／鎖定／改字全部歸零，undo 也救不回來（load() 會清空 undoS）。
+// 沒動過就不打擾：undoS 為空代表本來就沒東西可丟。
+// 起始頁跟對開一樣要重讀原檔，改動同樣會被清掉
+let fromPg0=fromPg.value;           // 使用者不要清掉時，把欄位退回上一個值
+fromPg.onchange = () => {
+  if(undoS.length && !confirm(T('改起始頁會重新載入原檔，目前的推拉／群組／鎖定／改字都會清掉。要繼續嗎？',
+      'Changing the start page reloads the source file — the pushes, groups, locks and text edits you have made will be discarded. Continue?')))
+    return fromPg.value=fromPg0;
+  fromPg0=fromPg.value;
+  buf && queueLoad();
+};
+spread.onchange = () => {
+  if(undoS.length && !confirm(T('切換對開表會重新載入原檔，目前的推拉／群組／鎖定／改字都會清掉。要繼續嗎？',
+      'Switching spread mode reloads the source file — the pushes, groups, locks and text edits you have made will be discarded. Continue?')))
+    return spread.checked=!spread.checked;
+  buf && queueLoad();
+};
+sink.onchange = () => units.length && render();
+// 合計離地線＝合計／總計列離地線留多少 pt（0 只是「還沒預設過」，見 relayout()；真的想貼齊下邊界就手動填 0）
+sinkGap.oninput = () => { SINKGAP=+sinkGap.value||0; sinkGapTouched=true; units.length && render(); };
+padT.oninput = padB.oninput = () => { PADT=+padT.value||0; PADB=+padB.value||0; units.length && relayout(); };
+// 註起始＝表尾註整段距「其它頁的地線」再偏移幾 pt（0＝最後一列下緣貼齊那條線）；
+// 地線跟著註走，所以移動的是註＋地線整組，註永遠不會穿出紙外。
+// 這個值只有分頁列上（最後一頁那條）有控制項——它就貼在會動到的那些註旁邊
+guide.onchange = () => units.length && render();
+vmid.onchange = () => units.length && render();
+minLh.oninput = () => { minLH=+minLh.value||0; units.length && render(); };
+// 全部頁面：有任何一頁還沒平均就全開，都開了就全關
+freeze.onclick = () => { breaks.slice(0,-1).forEach(b=>locks.add(b)); render(); };
+unfreeze.onclick = () => { locks.clear(); render(); };
+avgAll.onclick = () => { const on=avgPg.size<breaks.length; avgPg.clear();
+  if(on) breaks.forEach((_,i)=>avgPg.add(i)); render(); };
+editMode.onchange = () => { document.body.classList.toggle('edit', editMode.checked); units.length && render(); };
+
+async function load(){
+  const doc = await U.getDocument(await buf.arrayBuffer()).promise;
+  srcFonts.clear(); fontWarned=false; paleV=[];
+  // body.free 決定側欄顯示哪一組。原本只在 freeMode.onchange 設定，瀏覽器重新整理後
+  // 還原勾選狀態不會觸發 change，會排出自由編輯版面卻套著表格模式的側欄。
+  document.body.classList.toggle('free', freeMode.checked);
+  if(freeMode.checked) return loadFree(doc);
+  // 對開：奇數頁是左半、偶數頁是右半，兩頁併成一個「版」（右半的 x 平移一個頁寬）
+  const N = spread.checked ? 2 : 1;
+  const all=[], pgBot=[], frs=[], sizes=[];
+  // 起始頁：封面／目次跟內文是兩種版面，混在一起讀會用目次的表格線去框內文
+  const P0 = Math.min(Math.max(1, +fromPg.value||1), doc.numPages);
+  for(let p=P0;p<=doc.numPages;p+=N){
+    let txt=[], fr=[];
+    for(let k=0;k<N && p+k<=doc.numPages;k++){
+      const pg=await doc.getPage(p+k), vp=pg.getViewport({scale:1});
+      pageW=vp.width; H=vp.height;                    // 抽字／抽線要用這一頁自己的高度翻 y
+      sizes.push(pageW+'x'+H);
+      const dx=k*pageW;
+      const c=await pg.getTextContent();
+      await pg.getOperatorList();          // 跑過才會把字型載進 commonObjs，粗體資訊在那裡
+      markBold(c, await synthBold(pg));    // 合成粗體（Tr=2）——字型名判斷不到
+      txt.push(...markPale(lines(c, H, fonts(pg,c)), await pale(pg)).map(r=>shift(r,dx)));
+      fr.push(...(await getFrame(pg,H)).map(l=>({...l, x:l.x+dx})));
+    }
+    W = pageW*N;
+    // 每頁的地線各自量：末頁常把地線往上收，好在下面空出表尾註的位置
+    all.push(merge(txt)); pgBot.push(spanning(fr).pop()); frs.push(fr);
+  }
+  // 版面尺寸取多數決。原本是迴圈跑完留下的「最後一頁」，一份直式報告夾一張橫式大表
+  // （Apple FY24Q4 第 4 頁 792×612、其餘 612×792）就會整份被排到橫式紙上，@page 是
+  // 全域的，列印直接錯。全部同尺寸時多數決＝最後一頁，行為不變。
+  const sizeN = {}; sizes.forEach(k=>sizeN[k]=(sizeN[k]||0)+1);
+  const domSize = Object.keys(sizeN).sort((a,b)=>sizeN[b]-sizeN[a])[0];
+  [pageW, H] = domSize.split('x').map(Number);
+  W = pageW*N;
+  mixedSize = Object.keys(sizeN).length>1 ? Object.keys(sizeN).length : 0;
+  // 欄線 x 相同的頁共用同一份框線。一般連續表整份只有一種；對開表用單頁模式開會有兩種
+  // （左半欄線 254/368/473/577、右半 135/240/345/450），共用首頁那份就字線對不上。
+  // 不逐頁各畫自己那份——原檔地線常有幾 pt 的抖動（固資成本效益 783～788），會在頁間跳。
+  // 非表格型（純文字內文）：天地線要有兩條以上、且各自橫貫頁寬的一半以上。
+  // 不能只問「有沒有水平線」——內文頁常有一條短底線（實測 x=43 w=144），
+  // 而 spanning() 是拿線自己的左右界當基準，單獨一條短線會被當成「全寬」。
+  // 門檻用 pageW 不是 W：對開時 W 是兩頁寬，全寬線只跨其中半邊。
+  // 門檻 0.8：實測各檔真正的天地線佔頁寬 85～92%（中文 13 檔 91.9%、英文樣本 90.2%、
+  // NVIDIA 新聞稿 85.3%），而美國財報那種「合計底下的短底線」是 60.4%（Apple FY24Q4）。
+  // 原本 0.5 只夠濾掉內文頁的單條短底線（實測 24%），會把 60% 的合計底線當成天地線——
+  // 於是 Apple 那份被誤判成表格，topY 取到合計線上，真的資料列反而被歸成表尾註。
+  const SPAN = .8;
+  const spanN = f => new Set(f.filter(l=>!l.h && l.w > pageW*SPAN).map(l=>Math.round(l.y))).size;
+  // 框線基準原本寫死第一頁，但封面／目次那種沒有框線的頁會讓整份被判成無框線文件，
+  // 表尾註機制（第一個條件就是 !noFrame）整組關掉。改成往後找第一頁真的有框線的。
+  // 首頁本來就有框線時 find 回傳的就是首頁，行為不變。
+  frame = frs.find(f=>spanN(f)>=2) || frs[0] || [];
+  const noFrame = noFrameDoc = spanN(frame) < 2;
+  const canon = new Map();
+  frames = noFrame ? frs : frs.map(f => {
+    // 有半邊完全沒線的（對開表頁數是奇數時，末版只有左半）沿用首版框線——
+    // 但只取原頁有線的那半，空的那半張紙保持空白：拿首版另一半的線去補，
+    // 會畫出一張只有線、沒有字的幽靈表格頁（列印多一張空白格線頁）
+    const has = new Set(f.map(l=>Math.floor(l.x/pageW)));
+    let base;
+    if(has.size < N) base = frs[0];
+    else {
+      // 指紋只取貫穿表身的長直線去重後的 x：短的格內分隔線每頁條數不一樣（固資成本效益），
+      // 拿來當指紋會變成每頁一份，原檔地線那幾 pt 的抖動就會在頁間跳。
+      const k = [...new Set(f.filter(l=>l.h>50).map(l=>Math.round(l.x)))].sort((a,b)=>a-b).join();
+      if(!canon.has(k)) canon.set(k,f); base = canon.get(k);
+    }
+    return base.filter(l=>has.has(Math.floor(l.x/pageW)));
+  });
+  new Set(frames).forEach(capEnds);          // 線的幾何載入後就不再變，算一次就好
+  // 固定頁首 = 表頭橫線以上的內容（首頁一份、續頁一份，原樣不動）
+  const hy = noFrame ? [0,H] : spanning(frame);
+  bottomY = hy[hy.length-1];
+  // 表頭那幾條橫線彼此靠得近，資料區則是一大段空白；斷在第一個大間距處
+  let si=0; while(si+1<hy.length-1 && hy[si+1]-hy[si]<100) si++;
+  const sep = hy[si];
+  // 地線以下：純數字（≤2 段）是頁碼，跟著頁首走；其餘是表尾註，只畫在最後一頁
+  // Page 1／Page 1 of 12／F-3（10-K 財報頁）本來不算頁碼，落在地線下方就被歸為註。
+  // 這幾種寫法在中文檔裡不可能出現，加了對中文零影響。
+  const PGNO_RE = /^(\d+|page\s*\d+(\s*of\s*\d+)?|[A-Z]-\d+)$/i;
+  const isPgNo = r => r.length<=2 && PGNO_RE.test(r.map(s=>s.t).join(' ').replace(/\s+/g,' ').trim());
+  // 無框線時 bots[i] 等於紙高，「地線以下」永遠不成立，頁碼會混進資料列被推到下一頁。
+  // 改以紙張最下段（y > 頁高 × 0.9）認頁碼。
+  const atPgNo = (r,bot) => isPgNo(r) && (noFrame ? r.y > H*.9 : r.y > bot);
+  // 分列／分註只認「比首頁高」的地線：量不到全寬線的頁（spanning 退回整頁）沿用首頁值。
+  // 版面基準（平均列高、註起始）仍一律用首頁的 bottomY；末頁的框線收上去的量由該頁的
+  // 表尾註高度決定，在 render() 算（其餘的頁才用自己量到的地線）
+  const bots = noFrame ? pgBot.map(()=>bottomY) : pgBot.map(b=>Math.min(b, bottomY));
+  pgBots = bots;
+  head = all.map((pg,i)=>pg.filter(r=>r.y<=sep || atPgNo(r,bots[i])));
+  // 註常常騎在地線上（前一兩列在線上、其餘在線下），只看地線會把它切成兩半。
+  // 實測 13 個公文檔：「註／附註／說明」開頭的列一定是該頁最後一段，之後同頁沒有
+  // 資料列，所以從該列起算到頁尾都是註。限在頁面下段，避免表中真有「註」開頭的資料列。
+  // 對開表用單頁模式開時，右半頁的註是左半註的續行（不以「註」開頭）——沿用前一頁的
+  // 註起始並放寬 8pt（左右半的註高度略有出入），且要含中文字（右半的合計列是數字、
+  // 註是文字），避免把合計列收進註。
+  // 英文文件的錨點要跟冒號／句點（Note:、Notes.、* Source:），不然財報常見的
+  // 「Notes payable」這種資料列會被整段當成註吃掉；中文的「註」開頭本來就夠罕見。
+  const NOTE_RE = /^\s*(註|附註|說明|\*\s*(Notes?|Sources?)\b|(Notes?|Sources?)\s*[:：.])/i;
+  // 這份有中文字嗎。有的話一律走上面那條原本的規則，中文檔的判定與這段加入前逐位元相同。
+  const docCJK = all.some(pg=>pg.some(r=>/[\u4e00-\u9fff]/.test(r.map(s=>s.t).join(''))));
+  // 英文只多收「See/The accompanying notes…」這一句（審計財報的固定句，且一定是該頁最後一行）。
+  //
+  // 這裡刻意不收 (1)／(a)／單獨的 *／† 當錨點，也不做「從錨點往上吸收」：
+  // 「錨點以下到頁尾都是註」這個前提是中文公文表的性質（13 份實測皆成立），
+  // 但美國的財報新聞稿一頁裡可以是「表一 → 表一的註 → 表二」。實測 NVIDIA
+  // FY26Q3 新聞稿：放寬成 (A)/(B) 也算錨點時，第 8 頁的 (A)(B) 之後整張表、
+  // 第 9 頁的 Q4 Outlook 表與 About NVIDIA 全被當成註吃掉（376 列 → 344 列）。
+  // 要支援那種版型得先能判斷「註區塊在哪裡結束」，目前沒有足夠的真實樣本可以定這條界線。
+  const EN_NOTE_RE = /^\s*((Notes?|Sources?)\s*[:.]|\*\s*(Notes?|Sources?)\b|(see|the)\s+accompanying\s+notes?\b)/i;
+  const nfOwn = all.map(pg=>Math.min(...pg.filter(r=>r.y>H*.6 &&
+      (docCJK ? NOTE_RE : EN_NOTE_RE).test(docCJK ? r[0].t : r.map(s=>s.t).join(' ')))
+    .map(r=>r.y), Infinity));
+  const nfEff = [];
+  for(let i=0;i<all.length;i++)
+    nfEff[i] = nfOwn[i]<Infinity ? {v:nfOwn[i], carr:false}
+      : (i>0 && nfOwn[i-1]<Infinity) ? {v:nfOwn[i-1]-8, carr:true}
+      : (i>0 && nfEff[i-1] && nfEff[i-1].v<Infinity) ? {v:nfEff[i-1].v, carr:true}
+      : {v:Infinity, carr:false};
+  const isNote = (r,nf,bot) => !noFrame && !isPgNo(r) && (r.y>bot
+      || (r.y>=nf.v && (!nf.carr || /[\u4e00-\u9fff\p{L}]{2}/u.test(r.map(s=>s.t).join('')))));
+  // 註留在它原本那一頁。對開表用單頁模式開時，左右半頁的註是同幾句話的左右兩半、內容不同，
+  // 全部收成一份畫在末頁就會疊成一團（用人費用、固資來源、固資成本效益、OF-08-基金 都會）。
+  // 原檔末頁那份才是表尾註，跟著表格結尾走；其餘各頁的原位不動，該頁的列也不會排到它上面。
+  note = all.map((pg,i)=>pg.filter(r=>r.y>sep && isNote(r,nfEff[i],bots[i])));
+  // 重排備註要跟原檔比對「哪幾條改過字」：沒改過的條照原檔搬，改過字的才重新斷行
+  // （雙擊改字只換掉那一格的片段物件，這份深拷貝不會跟著變）
+  noteSrc = note.map(pg=>pg.map(r=>r.map(s=>({...s}))));
+  const tail = note[note.length-1] || [];
+  // 註起始＝表尾註整段再上下微調幾 pt，預設 0。定位改成由註自己算（見 render()）：
+  // 最後一列的下緣貼齊「其它頁的地線」，地線再從註的上緣往上收，所以原檔末頁的地線
+  // 收得多高都不再影響結果，這個值也不必再沿用原檔的偏移量。
+  NOTEY = 0;
+
+  rows=[]; units=[]; breaks=[]; sel.clear(); undoS=[]; redoS=[]; selSeg.clear();
+  avgPg.clear(); locks.clear(); minLH=0; dragI=lastI=null;
+  all.forEach((pg,i)=>{
+    const nf=nfEff[i];
+    const body=pg.filter(r=>r.y>sep && r.y<=bots[i] && !isNote(r,nf,bots[i]) && !atPgNo(r,bots[i]));
+    rows.push(...body); units.push(...body.map(r=>[r]));
+    breaks.push(units.length);
+  });
+  // 多表文件（封面＋目次＋多張表）也是文字型、也有全寬橫線，錯誤訊息若只講那兩點會把人帶錯方向。
+  // 這種檔的特徵是 sep 切太前面、幾乎整份被判成表尾註（OECD 300 頁實測 note=8757、表身 0 列）。
+  // 不擋，只提醒：無框線文件是刻意支援的（純文字內文），但 10-K／年報那種多節報告
+  // 也會落在這條路上，安靜地攤成幾千個假列。把判斷依據講出來讓使用者自己認。
+  loadWarn = [];
+  if(mixedSize) loadWarn.push(T(`這份混了 ${mixedSize} 種頁面尺寸，版面與列印一律用最多頁的那一種`,
+                                `${mixedSize} different page sizes in this file; layout and printing use the most common one`));
+  if(noFrame && doc.numPages-P0+1 >= 10)
+    loadWarn.push(T(`沒有橫貫全寬的天地線，改用無框線模式排版；若這是多節的報告（10-K、年報）而不是單一張表，結果不會有意義`,
+                    `No full-width top/bottom rules — laid out in borderless mode. If this is a multi-section report (a 10-K or annual report) rather than one table, the result will not be meaningful`));
+  const nNote = note.reduce((a,p)=>a+p.length,0);
+  if(!rows.length){ fail(nNote>50
+    ? T(`找不到表身資料列（地線以下被判成註的有 ${nNote} 列）。這份看起來不是單一連續表格，請先切出單一張表再試。`,
+        `No table body rows found (${nNote} lines below the bottom rule were treated as notes). This does not look like a single continuous table — split out one table and try again.`)
+    : T('找不到可調整的資料列（需為文字型 PDF，掃描檔沒有文字圖層）','No adjustable data rows found (needs a text-based PDF; scans have no text layer)')); return; }
+
+  // 表身格線：起始 y 與行高取自原檔
+  topY = rows[0].y;
+  const gaps = rows.slice(1,40).map((r,i)=>r.y-rows[i].y).filter(g=>g>1);
+  LH = gaps.sort((a,b)=>a-b)[Math.floor(gaps.length/2)] || 7;
+  // 無框線：地線 = 原檔內容最底 + 一個行高。不收的話 bottomY 是紙高，
+  // bodyBot 只離紙邊 PADB，列可以被推到列印邊界外。
+  if(noFrame){
+    // 頁碼被抽去當固定頁首了，地線不能低於它，否則列推到底會壓在頁碼上
+    const pnY = Math.min(...head.flat().map(r=>r.y), Infinity);
+    bottomY = Math.min(H, Math.max(...rows.map(r=>r.y)) + LH, pnY-2);
+    pgBots = pgBots.map(()=>bottomY);
+  }
+  // 紙張尺寸跟著來源 PDF 走；寫死 A4 的話，非 A4 的原稿列印時會被整份縮小
+  pagesize.textContent=`@page{size:${pageW}pt ${H}pt;margin:0}`;
+  drop.classList.add('hide');
+  relayout();
+};
+
+// 上下各留 PADT / PADB 的邊界，字才不會壓在天地線／表頭線上；改邊界只要重算這幾個值再重畫
+function relayout(){
+  bodyTop = topY + PADT;
+  bodyBot = bottomY - PADB;
+  // 表身底端 = 原檔最滿的一頁最後一列的位置，用它當各頁對齊的基準
+  const maxLines = Math.max(...breaks.map((e,i)=>nlines(i?breaks[i-1]:0, e)));
+  fillY = Math.min(bodyBot, bodyTop + (maxLines-1)*LH);
+  // 最小列高預設為原行高的 60%，再緊就不好看了；使用者可在工具列改
+  if(!minLH){ minLH=+(LH*.6).toFixed(1); minLh.value=minLH; }
+  // 合計離地線預設半個列高：貼齊下邊界（2pt）的話合計那列幾乎壓在地線上，
+  // 半個列高留得出一般表格該有的空隙；填 0 就是只留下邊界，填過就不再套預設
+  if(!SINKGAP && !sinkGapTouched){ SINKGAP=+Math.max(4, LH*.5).toFixed(1); sinkGap.value=SINKGAP; }
+  render();
+}
+
+// 文字依 y 分列（3pt 內同列），座標轉為由上而下
+// 從字型名稱取粗體與襯線與否（例：TimesNewRomanPS-BoldMT → 粗體＋襯線）
+const srcFonts=new Set();          // 原檔用到的字型名，列印前提醒用
+function fonts(pg,c){
+  const m={};
+  for(const fn of Object.keys(c.styles||{})){
+    let nm=''; try{ nm=(pg.commonObjs.get(fn)||{}).name||''; }catch(e){}
+    if(nm) srcFonts.add(nm.replace(/^[A-Z]{6}\+/,''));      // 去掉子集前綴 ABCDEF+
+    m[fn]={ b:/bold|black|heavy|semib/i.test(nm), s:/times|serif|roman|georgia|mingliu|song|kai/i.test(nm),
+            f:nm.replace(/^[A-Z]{6}\+/,'') };                // 原檔字型名（保留字型用）
+  }
+  return m;
+}
+
+// 原檔文字層常混入康熙部首／部首補充字元（「⾦」「⼟」「⺠」「⻑」等——PDF 產生器的 ToUnicode 對映錯），
+// 本機字型多半沒有這些字形，會 fallback 到明體，同一句字黑體明體混雜（看起來像字型跑掉）。
+// 載入時對映回正規字：康熙部首（U+2F00–U+2FDF）NFKC 有 1:1 分解；部首補充區（U+2E80–U+2EFF）
+// NFKC 不動，用 RAD_MAP 手動補。
+const RAD_MAP = { '\u2EA0':'民', '\u2ED1':'長' };
+const normCJK = t => {
+  if(!/[\u2E80-\u2FDF]/.test(t)) return t;
+  return t.replace(/[\u2E80-\u2FDF]/g, c => RAD_MAP[c] || c.normalize('NFKC'));
+};
+
+// 原檔字型名（去子集前綴後）→ 本機 CSS 堆疊：保留原檔字型，不要把蘋方當黑體、
+// 明體當黑體（fitWidths 會把寬度不同的字壓扁，看起來就是「字型怪怪的」）。
+// 匹配順序：先特定後一般；認不出來的回 ''，照舊用襯線／黑體二分類。
+const srcStack = sf => {
+  if(!sf) return '';
+  if(/jhenghei|dengxian|msyh|yahei/i.test(sf)) return "'微軟正黑體','Microsoft JhengHei','PingFang TC','Heiti TC',sans-serif";
+  if(/pingfang/i.test(sf)) return "'PingFang TC','PingFang HK','微軟正黑體','Microsoft JhengHei',sans-serif";
+  if(/times|roman/i.test(sf)) return "'Times New Roman',Times,serif";
+  if(/ming|song|sung/i.test(sf)) return "'新細明體','PMingLiU','MingLiU','Songti TC',serif";
+  if(/kai|biao/i.test(sf)) return "'標楷體','DFKai-SB','BiauKai','Kaiti TC',serif";
+  if(/arial|helvetica/i.test(sf)) return "Arial,Helvetica,sans-serif";
+  return '';
+};
+// 整份字型覆蓋：選了之後全部字用同一套（Windows／Mac 看到的結果一致）；''＝原樣
+let fontAll='';
+// 字型優先序：整份指定（fontAll）＞ 自由編輯換的字型（f）＞ 原檔字型（sf）＞ 襯線分類
+const segFont = s => fontAll ? famOf(fontAll) : (s.f ? famOf(s.f) : (srcStack(s.sf) || (s.s ? 'var(--serif)' : '')));
+
+// Word 對沒有粗體字面的字型（標楷體 DFKaiShu-SB-Estd-BF）用「填色＋描邊」做合成粗體，
+// 也就是文字繪製模式 Tr=2。字型名裡沒有 Bold，只看名字會把整份公文的粗體標題判成細體。
+// 回傳一個「依繪製順序的字元 → 是否粗體」陣列，跟 getTextContent 對位（見 markBold）。
+// ponytail: 不用字串比對——同一頁常有同樣的詞一處粗一處不粗（實測「單位」），會整批誤標。
+async function synthBold(pg){
+  const ops=await pg.getOperatorList(), OPS=U.OPS, out=[];
+  let tr=0, st=[];
+  for(let i=0;i<ops.fnArray.length;i++){
+    const fn=ops.fnArray[i], a=ops.argsArray[i];
+    if(fn===OPS.save) st.push(tr);
+    else if(fn===OPS.restore) tr=st.length?st.pop():tr;
+    else if(fn===OPS.setTextRenderingMode) tr=a[0];
+    else if(fn===OPS.showText || fn===OPS.showSpacedText)
+      for(const g of (a[0]||[])) if(g && typeof g==='object' && g.unicode)
+        for(const ch of g.unicode) if(!/\s/.test(ch)) out.push([ch, tr===2]);
+  }
+  return out;
+}
+// operator list 與 getTextContent 走的是同一份 content stream、順序一致，
+// 用「第幾個非空白字元」對位。指標只往前走，對不上就往前找一小段（ToUnicode 缺字時會有落差），
+// 找不到就放棄這個字，不會把後面全部帶偏。
+function markBold(c, flags){
+  if(!flags.length) return c;
+  let k=0;
+  for(const it of c.items){
+    if(!it.str || !it.str.trim()) continue;
+    let bold=false;
+    for(const ch of it.str){
+      if(/\s/.test(ch)) continue;
+      let j=k, lim=Math.min(flags.length, k+8);
+      while(j<lim && flags[j][0]!==ch) j++;
+      if(j<lim){ bold = bold || flags[j][1]; k=j+1; }
+    }
+    if(bold) it.__b=1;
+  }
+  return c;
+}
+
+function lines(c,H,ft={}){
+  const its=c.items.filter(i=>i.str.trim())
+    .map(i=>({x:i.transform[4], y:H-i.transform[5], t:normCJK(i.str), w:i.width,
+              b:((ft[i.fontName]||{}).b||i.__b)?1:0, s:(ft[i.fontName]||{}).s?1:0, sf:(ft[i.fontName]||{}).f||'',
+              sz:Math.hypot(i.transform[2],i.transform[3])}))
+    .sort((a,b)=>a.y-b.y);
+  const out=[]; let cur=null;
+  for(const it of its){
+    // 同一列裡中文與數字的基線常常差好幾 pt（正黑與 Times 的垂直對位不同，實測 3.26pt），
+    // 固定 3pt 會把一列切成兩列、行高中位數整個崩掉。門檻改成跟字級走：
+    // 半個字級遠比列距（≥ 一個字級）小，切得開換行，又併得回同列的中文與數字。
+    if(!cur || it.y-cur.y>rowTol(cur.sz,it.sz)){ cur={y:it.y, sz:it.sz, segs:[]}; out.push(cur); }
+    else cur.sz=Math.max(cur.sz,it.sz);
+    cur.segs.push(it);
+  }
+  return out.map(r=>Object.assign(r.segs.sort((a,b)=>a.x-b.x),{y:r.y}));
+}
+const shift=(r,dx)=>Object.assign(r.map(s=>({...s,x:s.x+dx})),{y:r.y});
+// 分列門檻：至少 3pt，字級大的表就跟著放寬到半個字級
+const rowTol=(a,b)=>Math.max(3, Math.max(a||0,b||0)*.5);
+const rowSz=r=>Math.max(0,...r.map(s=>s.sz||0));
+// 對開時左右兩半各自分好列，這裡再依 y 把同一列的左右內容併起來
+function merge(rs){
+  rs.sort((a,b)=>a.y-b.y);
+  const out=[];
+  for(const r of rs){
+    const p=out[out.length-1];
+    if(p && r.y-p.y<rowTol(rowSz(p),rowSz(r))) p.push(...r);
+    else out.push(Object.assign([...r],{y:r.y}));
+  }
+  return out.map(r=>Object.assign(r.sort((a,b)=>a.x-b.x),{y:r.y}));
+}
+
+// 取頁面框線（水平/垂直的直線段）
+async function getFrame(pg,H){
+  const ops=await pg.getOperatorList(), OPS=U.OPS, out=[];
+  // 路徑座標在目前的 CTM 之下，得自己追 transform / save / restore
+  // lw 預設 1（PDF 規格的預設線寬）。用 0.5 的話，沒下 setLineWidth 的檔（例：03-參考-OF-01-主要營運）
+  // 天地線的兩道 1pt 相接線會因為厚度算太細而併不起來，變成裂開的兩條細線。
+  // 明確寫 w 0 是 hairline，維持當 0.5 處理（03-參考-OF-07-長債 實測相符）。
+  // 填色顏色也是圖形狀態。這類 PDF 的線是「填色的扁矩形」，而 Apple FY24Q4 在同一個位置
+  // 各畫了一次 239,239,239 與一次 255,255,255 的 3.6×14pt 小矩形（每頁 126 對），在白紙上
+  // 兩種都看不見（把該頁點陣化，那一欄 8869 個取樣像素深色 0 個），不看顏色就會逐列疊成
+  // 一條原檔沒有的粗黑柱。門檻 230 與白字門檻的預設值同義：亮到這個程度就當它沒畫。
+  const LIGHT=230, isLight=c=>Math.min(c[0],c[1],c[2])>=LIGHT;
+  let m=[1,0,0,1,0,0], stack=[], lw=1, fc=[0,0,0];
+  const mul=(a,b)=>[a[0]*b[0]+a[2]*b[1], a[1]*b[0]+a[3]*b[1],
+                    a[0]*b[2]+a[2]*b[3], a[1]*b[2]+a[3]*b[3],
+                    a[0]*b[4]+a[2]*b[5]+a[4], a[1]*b[4]+a[3]*b[5]+a[5]];
+  const app=(x,y)=>[m[0]*x+m[2]*y+m[4], m[1]*x+m[3]*y+m[5]];
+  for(let i=0;i<ops.fnArray.length;i++){
+    const fn=ops.fnArray[i];
+    if(fn===OPS.save){ stack.push([m,lw,fc]); continue; }       // 線寬與填色也是圖形狀態，跟著 q/Q 存回
+    if(fn===OPS.restore){ const s=stack.pop(); if(s){ m=s[0]; lw=s[1]; fc=s[2]; } continue; }
+    if(fn===OPS.transform){ m=mul(m, ops.argsArray[i]); continue; }
+    if(fn===OPS.setLineWidth){ lw=ops.argsArray[i][0]*Math.hypot(m[0],m[1]) || .5; continue; }
+    if(fn===OPS.setFillRGBColor){ fc=ops.argsArray[i].slice(0,3); continue; }
+    if(fn!==OPS.constructPath) continue;
+    // 後面接 clip／endPath 的路徑是裁切區域，不會被畫出來（Apple 第 1 頁 2233 個 constructPath
+    // 裡有 1427 個是這種）。目前的尺寸條件本來就會把它們濾掉，這裡只是把語意寫對。
+    const nxt=ops.fnArray[i+1];
+    if(nxt===OPS.clip || nxt===OPS.endPath || nxt===undefined) continue;
+    if((nxt===OPS.fill || nxt===OPS.eoFill) && isLight(fc)) continue;   // 淺到看不見的填色不是線
+    const [cmds,raw]=ops.argsArray[i];
+    const co=[]; for(let j=0;j<raw.length;j+=2){ const p=app(raw[j],raw[j+1]); co.push(p[0],p[1]); }
+    let k=0,px=0,py=0;
+    for(const cm of cmds){
+      if(cm===OPS.moveTo){ px=co[k++]; py=co[k++]; }
+      else if(cm===OPS.lineTo){
+        const x=co[k++], y=co[k++];
+        if(Math.abs(y-py)<.5) out.push({x:Math.min(px,x), y:H-y, w:Math.abs(x-px), h:0, t:lw});
+        else if(Math.abs(x-px)<.5) out.push({x, y:H-Math.max(py,y), w:0, h:Math.abs(y-py), t:lw});
+        px=x; py=y;
+      }
+      else if(cm===OPS.rectangle){
+        const [x0,y0]=app(raw[k],raw[k+1]), [x1,y1]=app(raw[k]+raw[k+2],raw[k+1]+raw[k+3]);
+        k+=4;
+        const x=Math.min(x0,x1), w=Math.abs(x1-x0), t=H-Math.max(y0,y1), h=Math.abs(y1-y0);
+        px=x1; py=y1;
+        // 這類 PDF 的框線是「很扁的矩形」；長寬都大的是色塊（整頁底色），不是線
+        // 門檻放到 4pt：本工具自己列印出來的 PDF 再丟回來時，2pt 的天地線會被 Chrome
+        // 寫成 2.25pt 的矩形，卡在 2pt 會整條天地線被當色塊丟掉，表身變成 0 列
+        if(Math.min(w,h)>4) continue;
+        // 扁矩形當線，厚度就是它的短邊（例：這類公文表的框線是 0.75pt）
+        if(h<=4) out.push({x,y:t+h/2,w,h:0,t:h||.5});
+        else out.push({x:x+w/2,y:t,w:0,h,t:w||.5});
+        continue; }
+      else k+=cm===OPS.curveTo?6:2;
+    }
+  }
+  // 只留細長的框線，濾掉整頁底色之類的大色塊
+  return mergeLines(out.filter(l=>(l.w||l.h)>2));
+}
+
+// 有些表的天地線是兩道細線相接畫成的（例：y=84 與 85 各 1pt，其實是一條 2pt）。
+// 先把厚度相接／重疊、而且長度方向有交集的同向線併起來，之後吸附像素才不會裂成兩條。
+// 真正有間隙的雙線（例如 hairline 畫的雙橫線）不會被併，維持原樣。
+function mergeLines(ls){
+  const out=[];
+  for(const ori of [0,1]){                       // 0=水平 1=垂直
+    const g=ls.filter(l=>(ori? l.h : l.w)>0).map(l=>({...l}));
+    const key=l=>ori? l.x : l.y;                 // 粗細方向的中心
+    const t=l=>l.t||.5;
+    g.sort((a,b)=>key(a)-key(b));
+    const used=new Array(g.length).fill(false);
+    g.forEach((a,i)=>{
+      if(used[i]) return;
+      let lo=key(a)-t(a)/2, hi=key(a)+t(a)/2;
+      let s=ori? a.y : a.x, e=s+(ori? a.h : a.w);
+      for(let j=i+1;j<g.length;j++){
+        const b=g[j]; if(used[j]) continue;
+        const blo=key(b)-t(b)/2, bhi=key(b)+t(b)/2;
+        if(blo>hi+.01) break;                    // 已排序，再往後只會更遠
+        const bs=ori? b.y : b.x, be=bs+(ori? b.h : b.w);
+        if(be<s-.01 || bs>e+.01) continue;       // 長度方向沒交集，不是同一條
+        // 只併「同一條線的兩半」：併起來不能比原本較長的那條更長。
+        // 不然一條短粗線碰到一條長細線就會被拉成整條粗線，交接處凸出去。
+        if(Math.max(e,be)-Math.min(s,bs) > Math.max(e-s, be-bs)+1) continue;
+        lo=Math.min(lo,blo); hi=Math.max(hi,bhi); s=Math.min(s,bs); e=Math.max(e,be);
+        used[j]=true;
+      }
+      used[i]=true;
+      const c=(lo+hi)/2, th=hi-lo;
+      out.push(ori? {x:c, y:s, w:0, h:e-s, t:th} : {x:s, y:c, w:e-s, h:0, t:th});
+    });
+  }
+  return out;
+}
+
+// 橫貫整個表寬的橫線 y（表頭裡的短分隔線不算），由上而下
+function spanning(fr){
+  const hs=fr.filter(l=>!l.h);
+  if(!hs.length) return [0,H];
+  const L=Math.min(...hs.map(l=>l.x)), R=Math.max(...hs.map(l=>l.x+l.w));
+  const by=new Map();
+  hs.forEach(l=>{ const k=Math.round(l.y); (by.get(k)||by.set(k,[]).get(k)).push([l.x,l.x+l.w]); });
+  const full=[...by].filter(([y,segs])=>{
+    let cov=0, end=-1e9;
+    segs.sort((a,b)=>a[0]-b[0]).forEach(([a,b])=>{ cov+=Math.max(0,b-Math.max(a,end)); end=Math.max(end,b); });
+    return cov >= (R-L)*.9;
+  }).map(([y])=>y).sort((a,b)=>a-b);
+  return full.length>1 ? full : [...by.keys()].sort((a,b)=>a-b);
+}
+
+// ── 復原 / 重做：每次動作前存一份 units+breaks 快照（列本身唯讀，淺拷貝就夠） ──
+let undoS=[], redoS=[];
+const snap=()=>({u:units.map(u=>[...u]), b:breaks.slice(), h:head.map(p=>[...p]), n:note.map(p=>[...p]), l:[...locks]});
+const push=()=>{ undoS.push(snap()); redoS=[]; if(undoS.length>100) undoS.shift(); };
+// locks 以 unit 索引記，跟著 breaks 一起還原，不然復原後鎖會指到不存在的分頁點
+function restore(s){ units=s.u; breaks=s.b; head=s.h; note=s.n;
+  locks.clear(); s.l.forEach(b=>locks.add(b)); sel.clear(); render(); }
+function undo(){ if(!undoS.length) return; redoS.push(snap()); restore(undoS.pop()); }
+function redo(){ if(!redoS.length) return; undoS.push(snap()); restore(redoS.pop()); }
+// 焦點在輸入框／編輯中的格子時，⌘Z 是還原那格的打字，不該把整份版面倒回去
+const inField = () => { const a=document.activeElement;
+  return !!a && (a.isContentEditable || /INPUT|SELECT|TEXTAREA/.test(a.tagName)); };
+onkeydown = e => {
+  if(!(e.metaKey||e.ctrlKey) || e.key.toLowerCase()!=='z' || inField()) return;
+  e.preventDefault(); e.shiftKey ? redo() : undo();
+};
+
+const nlines=(a,b)=>units.slice(a,b).reduce((n,u)=>n+u.length,0);
+const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
+const th=l=>l.t||.5;
+const snapPx=pt=>Math.round(pt*96/72);       // pt → 整數 CSS px
+
+// 線條的粗細方向吸附到整數像素（長度方向維持原值，不影響接合）
+function lnBox(l,k){
+  const t=th(l), x=l.x-k*pageW, tp=Math.max(1,snapPx(t));
+  // 長度方向也吸到整數像素，再兩端各伸出半個線寬（至少 1px）——PDF 的線是 butt cap，
+  // 橫線畫到直線的「中心」就停了，加上兩軸各自吸附的捨入誤差，交接處會露出缺口。
+  // 兩端一律切齊相接那條線的外緣（capEnds 先算好，過長就縮），孤立的端點維持原長。
+  const c0=l.c0||0, c1=l.c1||0;                   // capEnds 算好的兩端延伸量（px）
+  const px=(a,b)=>[snapPx(a)-c0, Math.max(1, snapPx(a+b)-snapPx(a)+c0+c1)];   // 先算兩端再相減，避免長度飄移
+  if(l.w){ const [L,Wd]=px(x,l.w);
+    return `left:${L}px;top:${snapPx(l.y-t/2)}px;width:${Wd}px;height:${tp}px`; }
+  const [T,Ht]=px(l.y,l.h);
+  return `left:${snapPx(x-t/2)}px;top:${T}px;width:${tp}px;height:${Ht}px`;
+}
+
+// 算出每條線兩端該延伸多少 px：剛好補到相接那條線的外緣，不多也不少。
+// 伸「半個自己的線寬」會在細線交接處凸出去（放大看得到），所以要看對方的粗細。
+// ponytail: 每頁百來條線，直接兩兩比對就夠快；線多到有感再換掃描線
+function capEnds(ls){
+  const hs=ls.filter(l=>l.w), vs=ls.filter(l=>l.h);
+  const lo=o=> o.w ? snapPx(o.y-th(o)/2) : snapPx(o.x-th(o)/2);   // 對方線的近端外緣（px）
+  const hi=o=> lo(o)+Math.max(1,snapPx(th(o)));                   // 遠端外緣
+  ls.forEach(l=>{
+    const perp = l.w?vs:hs;
+    // 兩條垂線靠得很近時挑軸心最近的那條，挑錯會補到隔壁去
+    const near=(x,y)=>perp.filter(o=> o.w ? (Math.abs(o.y-y)<2 && x>o.x-2 && x<o.x+o.w+2)
+                                          : (Math.abs(o.x-x)<2 && y>o.y-2 && y<o.y+o.h+2))
+                          .sort((p,q)=>Math.abs(p.w?p.y-y:p.x-x)-Math.abs(q.w?q.y-y:q.x-x))[0];
+    const a=l.w?l.x:l.y, b=a+(l.w?l.w:l.h);
+    const o0=near(l.x, l.y), o1=l.w?near(l.x+l.w, l.y):near(l.x, l.y+l.h);
+    // 可正可負：原檔畫過頭的（端點已越過對方外緣）就往回縮，一律切齊外緣
+    l.c0 = o0 ? snapPx(a)-lo(o0) : 0;
+    l.c1 = o1 ? hi(o1)-snapPx(b) : 0;
+  });
+}
+function status(){
+  msg.textContent=T(`${nlines(0,units.length)} 列 / 每頁上限 ${perPage} 列`,`${nlines(0,units.length)} rows / max ${perPage} per page`)
+    + (sel.size?T(`　已選 ${sel.size} 列`,` · ${sel.size} rows selected`):'')
+    + (selSeg.size?T(`　已選 ${selSeg.size} 格`,` · ${selSeg.size} cells selected`):'')
+    + (loadWarn.length?'　⚠ '+loadWarn.join('　⚠ '):'');
+  bu.disabled=!undoS.length; br.disabled=!redoS.length;
+  // 全部頁面那顆是切換鈕，名稱要跟著現在的狀態走
+  const allOn = breaks.length && avgPg.size>=breaks.length;
+  avgAll.textContent = allOn ? T('取消平均列高：全部頁面','Undo even row height: all pages')
+                             : T('平均列高：全部頁面','Even row height: all pages');
+  freeze.disabled = locks.size>=breaks.length-1; unfreeze.disabled = !locks.size;
+}
+
+// 文字在 PDF 裡是以「基線」定位，但 CSS 的 top 是行框上緣，兩者相差多少要看實際字型的
+// ascent，猜不得（Times 0.89、正黑 1.08）。實地量一次每種字型組合，之後直接換算。
+// 快取的鍵要帶「實際量到的字型」：ascent 取決於 segFont() 的結果，而它看的是
+// fontAll（整份字型）與 s.f（自由編輯換的字型），不是只有原檔字型名。
+// 少了這兩個，換字型之後會拿舊字型的 ascent 去擺新字型的字，整份基線偏掉。
+const bo={};
+function baseOff(s0){
+  const ff=segFont(s0)||'';
+  const k=`${s0.sz}|${s0.b?1:0}|${s0.s?1:0}|${ff}`;
+  if(bo[k]!=null) return bo[k];
+  const sz=s0.sz, p=document.createElement('span');
+  p.className='seg';                       // 一定要用跟正文相同的字型來量，否則 ascent 會不一樣
+  p.style.cssText=`position:absolute;visibility:hidden;white-space:pre;font-size:${sz}pt;line-height:${sz}pt`
+    +(s0.b?';font-weight:700':'')+(ff?';font-family:'+ff:'');
+  p.textContent='X';
+  const s=document.createElement('span');
+  s.style.cssText='display:inline-block;width:0;height:0;vertical-align:baseline';
+  p.appendChild(s); document.body.appendChild(p);
+  const off=(s.getBoundingClientRect().top-p.getBoundingClientRect().top)*72/96;
+  p.remove();
+  return bo[k]=off;
+}
+
+// 從第 pi 頁往後，到下一個鎖定的分頁點（含該頁）為止
+function segPages(pi){
+  const out=[];
+  for(let j=pi;j<breaks.length;j++){ out.push(j); if(locks.has(breaks[j])) break; }
+  return out;
+}
+
+// 表尾註整段的幾何：第一列的基線、最後一列的基線、它自己的行距、以及整段的高度。
+// 列框的慣例和畫面一致（基線上方 0.8 行、下方 0.2 行），所以高度＝列距總和＋0.2＋0.8 行。
+// 行距沿用原檔註自己的列距（重排備註後也一樣），只有一列時用字級推。
+function noteBox(nt){
+  const ys=nt.map(r=>r.y).sort((a,b)=>a-b);
+  const gs=ys.slice(1).map((y,i)=>y-ys[i]).filter(g=>g>1).sort((a,b)=>a-b);
+  const lh=gs.length ? gs[gs.length>>1] : Math.max(10, rowSz(nt[0])*1.35);
+  return {lo:ys[0], hi:ys[ys.length-1], lh, h:ys[ys.length-1]-ys[0]+lh};
+}
+
+function render(){
+  // 每頁上限跟著最小列高走，改「最小列高」時要一起更新，否則推拉列的上限會沿用舊值
+  perPage = Math.floor((bodyBot-bodyTop)/(minLH||LH))+1;
+  out.innerHTML='';
+  let start=0;
+  breaks.forEach((end,pi)=>{
+    // 對開時直接產生兩張實體頁，各自只放自己那半邊的東西。
+    // （不要用「雙頁寬圖層往左推＋overflow:hidden」——被遮住的元素仍算在版面寬度裡，
+    //   Chrome 列印時會為了「符合寬度」把整份縮小。）
+    const N=Math.round(W/pageW), sheet=document.createElement('div');
+    sheet.className='sheet';
+    const halves=[];
+    for(let k=0;k<N;k++){
+      const pageEl=document.createElement('div'); pageEl.className='page';
+      pageEl.style.cssText=`width:${pageW}pt;height:${H}pt`;
+      sheet.appendChild(pageEl); halves.push(pageEl);
+    }
+    // 行距微調：除了最後一頁，各頁的列都平均分佈到原檔的表身底端，
+    // 少一列就稍微放寬、多一列就稍微壓縮，不會在頁尾留下一塊突兀的空白。
+    const n=nlines(start,end);
+    const last=pi===breaks.length-1;
+    // 表尾註跟著表格結尾走：末頁畫原檔末頁那份；其餘各頁的註（對開表用單頁模式開時才會有）
+    // 畫在自己那頁的原位（畫在下面，這裡先算位置）
+    const ni = last ? note.length-1 : pi, nt = note[ni] || [];
+    // 表尾註整段墊到「其它頁的地線」上：最後一列的下緣貼齊 bottomY，地線再從註的上緣往上收，
+    // 收到剛好讓整段註塞得下——也就是「地線＝其它頁的地線 − 所有備註列的高度」。
+    // 原檔末頁的地線自己收在哪裡不再是依據：收得比註需要的高，註就浮在半空中、和別頁的註
+    // 對不齊；收得不夠（或註改完字變長）就穿出紙外。改從註本身算，每一份的註都會落在同一條
+    // 帶上、下緣和別頁的地線切齊，重排備註變長也只是把地線往上推。
+    const nb = nt.length ? noteBox(nt) : null;
+    const ndy = last && nb ? bottomY+NOTEY-(nb.hi+nb.lh*.2) : 0;
+    const noteTop = nb ? nb.lo+ndy : Infinity;
+    // 其餘的頁沿用原檔自己收上去的地線：原檔列不滿的頁常把地線提上來，空出下面放註
+    // （固資成本效益 84pt、OF-08-基金 64pt），每頁都畫首頁那條的話，註就被框在表格裡面。
+    // 三個條件都成立才收，而且是全有全無——收一半會讓地線從註中間穿過去：收線量要大過半個
+    // 行高（濾掉兩道 1pt 疊出來的線合併後 ±1 的飄移，例：長債）、註要整段落在新地線下方、
+    // 這頁的列壓到最小列高仍排得進去（推太多列進來就自動退回原位）。
+    const raise = bottomY-(pgBots[last ? pgBots.length-1 : pi] ?? bottomY);
+    const lo = bodyBot-raise;                                    // 收線後這頁的排版下限
+    const lh0 = Math.max(minLH, Math.min(LH, (lo-bodyTop)/Math.max(1,n-1)));
+    const shrink = last && nb ? Math.max(0, nb.h-NOTEY)
+                              : raise>LH/2 && noteTop>=bottomY-raise && bodyTop+(n-1)*lh0<=lo+.5 ? raise : 0;
+    // 框線照頁首的規則挑：首頁用首頁那份，續頁一律用第 2 頁的（對開表左右半的欄線不同）
+    const base = frames[pi] || frames[Math.min(1,frames.length-1)] || frame;
+    const fr = shrink ? base.map(l=> l.w ? (l.y>=bottomY-1 ? {...l, y:l.y-shrink} : {...l})
+                                         : (l.y+l.h>=bottomY-1 ? {...l, h:Math.max(1,l.h-shrink)} : {...l}))
+                      : base;
+    if(shrink) capEnds(fr);
+    const bBot = bodyBot-shrink;
+    halves.forEach(h=>h.__ln=[]);
+    fr.forEach(l=>{
+      const k=Math.min(N-1,Math.floor(l.x/pageW));
+      halves[k].__ln.push({...l, x:l.x-k*pageW});     // 頁內座標，進自由編輯時直接接手
+      halves[k].insertAdjacentHTML('beforeend',
+        // l.x / l.y 是線的中心，畫成方塊要退半個線寬；粗細方向再吸附到整數像素，
+        // 否則落在半個像素上的線會被反鋸齒糊成兩三個像素，看起來比別條粗。
+        `<div class=ln style="${lnBox(l, k)}"></div>`);
+    });
+    // 輔助線：上界畫在第一列文字的頂端（列框也是從基線退 0.8 行起算），下界畫在最後一列基線
+    if(guide.checked) halves.forEach(h=>h.insertAdjacentHTML('beforeend',
+      `<div class=gd style="top:${bodyTop-LH*.8}pt"></div><div class=gd style="top:${bBot}pt"></div>`));
+    // 首頁用首頁頁首，續頁一律用第 2 頁的（含「（續）」），只換頁碼
+    const hi = head[pi] ? pi : Math.min(1,head.length-1);
+    head[hi].forEach((r,ri)=>halves.forEach((h,k)=>
+      h.insertAdjacentHTML('beforeend', segs(r, r.y, false, pi*N+1, 0, `h,${hi},${ri}`, k))));
+    nt.forEach((r,ri)=>halves.forEach((h,k)=>
+      h.insertAdjacentHTML('beforeend', segs(r, 0, false, 0, ndy, `n,${ni},${ri}`, k))));
+    // 這頁的列能排到哪裡：地線。末頁的註已經整段墊在地線下方（地線就是從註的上緣算的），
+    // 不必再退讓；其餘的頁若註騎在地線上（原檔的註起始在線上方）就退一個原行高，
+    // 否則最後一列會壓在註上面（平均列高把列拉到底時最明顯）
+    const botLimit = noteTop>bBot ? bBot : Math.min(bBot, noteTop-LH);
+    // 勾「平均列高」＝這頁的列平均分佈到表身底端；
+    // 沒勾時維持原行為：非最後一頁對齊「最滿那頁」的底端 fillY，最後一頁保留原行高。
+    // 「文字置中」＝把這頁切成 n 個等高的列帶（上界到底端），文字擺在自己那帶的正中；
+    // 沒勾就維持原本的 n-1 個間距、文字貼在自己的基線上。
+    const mid = vmid.checked, top0 = bodyTop-LH*.8;
+    const avg = avgPg.has(pi), sp = mid ? n : Math.max(1,n-1);
+    const div = bot => (bot-(mid?top0:bodyTop))/sp;
+    const lh = Math.max(minLH, avg ? div(botLimit)
+                             : !last ? div(Math.min(fillY,botLimit))
+                                     : Math.min(LH,div(botLimit)));
+    // 「合計貼地線」：最後一頁列不滿時，尾端那幾列合計／總計整塊沉到地線上方，
+    // 中間留白；其餘列位置與行距都不動（跟「平均列高」把整頁拉開不同）。
+    // 沉到哪裡＝地線再往上「合計離地線」那麼多（預設半個列高，見 relayout()）
+    const cy = mid ? -(lh-LH)/2 : 0;
+    const pg=units.slice(start,end);
+    // 非表格型文件：列距本來就不一致（段落、條列、內嵌表格的儲存格高度都不同），
+    // 一律等高會把版面拉爛，內嵌表格的字還會跟自己那頁的框線錯開。
+    // 保留原檔的相對列距，只有這頁排不下時整體等比壓縮。勾「平均列高」可切回等高。
+    let ly=null, lyH=lh;
+    if(noFrameDoc && !avg && pg.length){
+      const y0=pg[0][0].y, acc=pg.map(u=>u[0].y-y0);
+      const need=acc[acc.length-1]+(pg[pg.length-1].length-1)*LH;
+      const avail=botLimit-bodyTop;
+      const k = need>avail && need>0 ? avail/need : 1;
+      ly=acc.map(v=>v*k); lyH=LH*k;
+    }
+    const isTot=u=>/^[\s　]*[合總][\s　]*計/.test(u[0].map(s=>s.t).join(''));
+    let tot=0; if(last && sink.checked) while(tot<pg.length && isTot(pg[pg.length-1-tot])) tot++;
+    const sunk = tot ? Math.max(0, botLimit-SINKGAP-(bodyTop+(n-1)*lh)) : 0;
+    let li=0;
+    pg.forEach((u,i)=>{
+      const dy = i>=pg.length-tot ? sunk : 0;
+      halves.forEach((h,k)=>{
+        const e=document.createElement('div');
+        e.className='row'+(sel.has(start+i)?' sel':'')+(u.length>1?' grp':'');
+        // 框往上抬 0.8 行，讓可點擊範圍蓋住文字本身而不是它下面那行
+        e.style.cssText=`left:0;top:${(ly ? bodyTop+ly[i]+dy-lyH*.8 : bodyTop+li*lh+dy-cy-lh*.8)}pt;width:100%;height:${u.length*(ly?lyH:lh)}pt`;
+        e.draggable=!editMode.checked;   // 編輯模式下不拖曳，否則點字會變成拖列
+        // 拖曳是「重排」，跨頁時次頁會遞補一列回來；要真的把列推到下頁得用頁間按鈕
+        e.title=T('拖曳＝與目標列交換位置（跨頁時次頁會遞補一列回來）\n要把最後一列推到下頁，請用頁與頁之間的「↓ 最後一列推到下頁」',
+                'Drag = swap with the target row (across pages, the next page sends one back)\nTo push the last row to the next page use "↓ Push last row down" between the pages');
+      e.dataset.i=start+i;
+        e.innerHTML=u.map((r,j)=>segs(r,0,true,0,j*(ly?lyH:lh)+(ly?lyH:lh)*.8,`u,${start+i},${j}`,k)).join('');
+        h.appendChild(e);
+      });
+      li+=u.length;
+    });
+    // 每一版（單頁，或對開的左右兩張）連同底下的分頁列包成一個 .blk：分頁列要對齊的是
+    // 「這一版的紙」而不是 #out。對開表在 100% 時紙比 #out 寬，#out 不會跟著撐開，
+    // 只靠 margin:auto 會把分頁列置中到偏左的位置（實測差 215px）
+    const blk=document.createElement('div'); blk.className='blk'; blk.appendChild(sheet);
+    const b=document.createElement('div'); b.className='brk';
+    const lk=locks.has(end);
+    // 分頁列上真正要看的數字是「這一頁有幾列」——要不要推、要不要拉，判斷全在它身上；
+    // 列高只是衍生的結果。原本只印列高，等於把決策依據藏起來
+    const lead = ly ? T('原行距','original leading')
+                     +(lyH<LH-.05?T(`（壓縮至 ${(lyH/LH*100).toFixed(0)}%）`,` (compressed to ${(lyH/LH*100).toFixed(0)}%)`):'')
+                  : T(`列高 ${lh.toFixed(1)}pt`,`row height ${lh.toFixed(1)}pt`);
+    b.innerHTML=`<b>${T(`第 ${pi+1} 頁`,`Page ${pi+1}`)}</b>`
+      + `<span class="sub">${T(`${n} 列`,`${n} rows`)}・${lead}</span>`
+      // 推／拉是整個工具最常按的兩顆：放最前面、給實心色。鎖定是偶爾用的，縮成一顆圖示鈕
+      + (last?'':`<button data-d="-1" class="bpri" ${lk||!canMove(pi,-1)?'disabled':''} title="${T('把本頁最後一列推到下一頁','Move the last row of this page to the next page')}">${T('↓ 推一列到下頁','↓ Push a row down')}</button>
+        <button data-d="1" class="bpri" ${lk||!canMove(pi,1)?'disabled':''} title="${T('把下一頁的第一列拉回本頁','Pull the first row of the next page back up')}">${T('↑ 拉一列上來','↑ Pull a row up')}</button>`)
+      + `<label class="sub" title="${T('從本頁套用到下一個鎖定的分頁點為止','Applies from this page up to the next locked break')}"><input type=checkbox data-a=1 ${avg?'checked':''}> ${T('平均列高','Even rows')}</label>`
+      + (last?'':`<button data-k=1 class="bico" title="${T('鎖住後這個分頁點不能移動','Once locked, this break cannot move')}">${lk?T('🔒 已鎖','🔒 Locked'):T('🔓 鎖定','🔓 Lock')}</button>`)
+      // 表尾註：把「註起始」與「重排備註」放在最後一頁的分頁列上，調的時候眼睛不用離開註本身
+      + (last&&nt.length?`<span class="sep"></span><span class="sub">${T('註起始','Note offset')}
+          <button data-n="-1" class="bico" title="${T('表尾註整段往上移 1pt（地線跟著往上收）','Move the whole footnote block up 1pt (the bottom rule follows)')}">−</button><b>${NOTEY.toFixed(1)}</b><button data-n="1" class="bico" title="${T('表尾註整段往下移 1pt（地線跟著往下放）','Move the whole footnote block down 1pt (the bottom rule follows)')}">+</button>pt</span>`
+        + `<button data-r=1 class="bico" title="${T('把改過字的表尾註那一條重新斷行（沒改過的一字不動，連原檔的行尾都留著）；對開表會跨兩張紙接排','Re-wrap the footnote items whose text you edited (untouched ones stay exactly as in the source); spreads flow across both sheets')}">${T('重排備註','Re-wrap notes')}</button>`
+        :'');
+    // 核取方塊走 change（點到 label 文字也算），按鈕走 click
+    // 鎖定的分頁點是「段」的界線：從本頁一路套用到下一個鎖定點所在的那頁為止
+    b.querySelector('[data-a]').onchange=ev=>{
+      for(const j of segPages(pi)) ev.target.checked?avgPg.add(j):avgPg.delete(j);
+      render();
+    };
+    b.onclick=ev=>{
+      const t=ev.target.closest?.('button'); if(!t) return;
+      if(t.dataset.k){ locks.has(end)?locks.delete(end):locks.add(end); return render(); }
+      // 重排備註：跟側欄那顆同一條路徑（自己會 push 並 render，所以這裡直接結束）
+      if(t.dataset.r){ return reflowNote(); }
+      // 分頁列上的加減鈕：1pt 級微調，按一下 render 一次，值就顯示在同一條分頁列上
+      const nv=+t.dataset.n;
+      if(nv){ NOTEY=+(NOTEY+nv).toFixed(1); return render(); }
+      const v=+t.dataset.d; if(v) move(pi,v);
+    };
+    blk.appendChild(b); out.appendChild(blk);
+    start=end;
+  });
+  status();
+  // 頁面容器落在半個像素上，裡面吸附過的線就會被反鋸齒攤成兩條；整頁往上挪回整數裝置像素。
+  // 先清完再一次量完再一次寫，避免每頁一次 reflow
+  const dpr=devicePixelRatio||1, pgs=[...out.querySelectorAll('.page')];
+  pgs.forEach(p=>p.style.transform='');
+  const tops=pgs.map(p=>p.getBoundingClientRect().top);
+  pgs.forEach((p,i)=>p.style.transform=`translateY(${(Math.round(tops[i]*dpr)-tops[i]*dpr)/dpr/zm}px)`);
+  bindDrag(); bindEdit(); fitWidths(); zoomBars();   // 分頁列是重新產生的，縮放要重新抵掉
+}
+
+// 這個分頁點還能不能往 d 的方向搬。分頁列上的 ↓／↑ 靠它決定要不要變灰——
+// 不能搬時按鈕直接 disabled，不然使用者只會覺得「按了沒反應」
+function canMove(pi,d){
+  if(locks.has(breaks[pi])) return false;                      // 分頁點鎖定中
+  const prev = pi===0?0:breaks[pi-1];
+  if(d<0) return breaks[pi]-1>prev;                            // 本頁不能空
+  return breaks[pi]+1<=breaks[pi+1] && nlines(prev,breaks[pi]+1)<=perPage;   // 不能超出地線
+}
+function move(pi,d){
+  if(!canMove(pi,d)) return;
+  push();
+  breaks[pi]+=d;
+  breaks=breaks.filter((b,i)=>b>(i?breaks[i-1]:0));            // 搬空的頁就刪掉，不留空白頁
+  remapLocks(b=>b);                                            // 頁被刪掉時，指向它的鎖也一併清掉
+  render();
+}
+
+// ── 重排表尾註 ──
+// 註在原檔是一串絕對定位的片段、斷行是寫死的，所以雙擊改完字之後後面的字不會跟著跑。
+// 重排＝把改過字的那幾條接起來重新斷行：條號（1. 2.）各自成一條、續行縮排到條號後面，
+// 排到半頁右緣就接到下一個半頁繼續——對開表的註本來就是橫跨兩張紙的一行。
+//
+// **沒改過字的條一律照原檔搬**（連原檔的段寬 data-w 與每一段自己的基線都留著）。
+// 理由是重排用的字寬是本機字型量出來的、不是原檔排那一行時用的字型，整段重排會讓
+// 沒動到的行尾一起跑掉、還會把標點搬到別行去——實測 `OF-05 固資來源` 只改一個數字，
+// 原檔第 4 行行首的「就被搬到第 3 行行尾。只重排改過的那一條，改一次字只影響那一條。
+
+// 量字寬：拿一個隱藏的 .seg 來量，字型／fallback 與畫面上完全一致（放在 out 外面，不吃 zoom）
+// 量完就拿掉，不留在 DOM 裡——藏在版面外的元素仍算進版面寬度，Chrome 列印會為了「符合寬度」整份縮小
+const mEl=document.createElement('span');
+mEl.className='seg'; mEl.style.cssText='visibility:hidden;left:0;top:0';
+const mCache=new Map();
+function textW(t,s){
+  const k=`${s.sz}|${s.b?1:0}|${s.s?1:0}|${segFont(s)||''}|${t}`;
+  if(mCache.has(k)) return mCache.get(k);
+  mEl.style.fontSize=mEl.style.lineHeight=s.sz+'pt';
+  mEl.style.fontWeight=s.b?'700':'';
+  mEl.style.fontFamily=segFont(s)||'';
+  mEl.textContent=t;
+  const w=mEl.getBoundingClientRect().width*72/96;
+  mCache.set(k,w); return w;
+}
+
+// 把整段註切成「條」：條號（1. 2.、2.xxx 都算）各自成一條，沒有條號的整段算一條。
+// 每一條記下它用到哪幾列（ri＝原檔的實體行）、原文（比對有沒有改過字用）與片段。
+function noteItems(blk){
+  const items=[]; let cur=null;
+  blk.forEach((r,ri)=>r.forEach(s=>{
+    if(isMark(s.t) || !cur) items.push(cur={mark:null, rows:[], segs:[]});
+    if(cur.rows[cur.rows.length-1]!==ri) cur.rows.push(ri);
+    cur.segs.push(s);
+    if(isMark(s.t)) cur.mark=s;
+  }));
+  return items.map(it=>Object.assign(it,{text:it.segs.map(s=>s.t).join('')}));
+}
+// 條號：原檔獨立片段（「1.」）或黏著內文的（「2.兼任人員…」）都算。
+// 「1.5倍」的點後是數字，不當條號。
+const isMark=t=>/^\d+[.、](\s|[\u4e00-\u9fff]|$)/.test(t.trim());
+// 中文避頭尾點：收尾符號不能落在行首、開頭符號不能落在行尾
+const NO_START=/[）」』】》〉〕｝”’！？：；、。，．・ー～…%‰℃]/;
+const NO_END=/[（「『【《〈〔｛“‘]/;
+
+function reflowNote(){
+  let bi=note.length-1; while(bi>0 && !note[bi].length) bi--;
+  const blk=note[bi];
+  if(!blk || !blk.length) return;
+  // 對開表用單頁模式開時，每一份註只是整句話的左半或右半，接起來會是錯的
+  if(!spread.checked && note.filter(p=>p.length).length>1)
+    return alert(T('這份的註被拆在左右半頁，接起來會是錯的。請先勾「對開表」再重排。','This document\u2019s notes are split across the two halves; joining them would be wrong. Tick "Spread" first, then re-wrap.'));
+  push();
+  document.body.appendChild(mEl);
+  try{ note[bi]=reflow(blk, noteSrc[bi]); } finally { mEl.remove(); }
+  render();
+}
+
+function reflow(blk, base){
+  // 左右邊界取自框線的橫線（每個半頁同一組邊界）
+  const hs=frame.filter(l=>l.w && l.x<pageW);
+  const mL=hs.length?Math.min(...hs.map(l=>l.x)):30;
+  const mR=hs.length?Math.max(...hs.map(l=>l.x+l.w)):pageW-30;
+  const lo=k=>k*pageW+mL;
+  const flat=blk.flatMap(r=>r.map(s=>s));
+  // 行高沿用原檔註的列距；只有一列時用字級推
+  const ys=blk.map(r=>r.y), sz=rowSz(blk[0])||11;
+  const gaps=ys.slice(1).map((y,i)=>y-ys[i]).filter(g=>g>1).sort((a,b)=>a-b);
+  const lh=gaps.length?gaps[gaps.length>>1]:sz*1.35;
+  // 原檔的註排到第幾個半頁為止就接到哪：長債的註整段只佔左半，不該被攤成兩頁寬
+  const N=Math.max(1, ...flat.map(s=>Math.floor(s.x/pageW)+1));
+  // 右緣取框線與原檔註本身的較大者：有些檔的註比表格寬（固資成本效益排到 604，框線只到 577），
+  // 一律用框線會把它壓窄、平白多擠出一行
+  const rEdge=[]; for(let k=0;k<N;k++) rEdge[k]=Math.max(k*pageW+mR,
+      ...flat.filter(s=>Math.floor(s.x/pageW)===k).map(s=>s.x+(s.w||0)));
+  const hi=k=>rEdge[k];
+  const items=noteItems(blk), src=base?noteItems(base):null;
+  const out=[], done=new Set(); let off=0;      // off＝上面幾條行數增減造成的位移
+  items.forEach((it,i)=>{
+    // 沒改過字：整條照原檔畫（每一段自己的 x/y 與原檔段寬 w 都留著），只跟著上面的行數變化平移
+    if(src && src[i] && src[i].text===it.text){
+      it.rows.forEach(ri=>{ if(done.has(ri)) return; done.add(ri);
+        const r=blk[ri];
+        out.push(Object.assign(r.map(s=>({...s, y:s.y+off})), {y:r.y+off})); });
+      return;
+    }
+    // 改過字：從這一條自己在原檔的位置重排，下面幾條跟著位移
+    const y0=(it.rows.length?blk[it.rows[0]].y:ys[0])+off;
+    const rows=wrapItem(it,{blk, lo, hi, N, lh, y0});
+    out.push(...rows);
+    off+=(rows.length-it.rows.length)*lh;
+  });
+  return out;
+}
+
+// 把一條重新斷行，回傳一組列（y 從 y0 起算、每行加一個 lh）。
+// 條號欄（xMark）與內文欄（xText）用它自己在原檔的座標，不是整段共用一組。
+function wrapItem(it, c){
+  const {blk, lo, hi, N, lh, y0}=c;
+  const mi=it.mark?it.segs.indexOf(it.mark):-1;
+  const pre=mi>=0?it.segs.slice(0,mi):it.segs.slice();
+  const m=it.mark?/^(\d+[.、])([\s\S]*)$/.exec(it.mark.t.trim()):null;
+  const mark=it.mark?{...it.mark, t:m?m[1]:it.mark.t, w:0}:null;
+  // 條號黏著內文（「2.本年度…」）時，內文欄用條號自己量出來的寬度推，
+  // 不能拿同一行右邊的續段當內文欄——長債會算成 549，每行只剩 28pt，8 行炸成 142 行
+  const first=it.segs[0];
+  // 續行的縮排：有條號就用條號後面的內文欄；沒有條號（「註：…」整段）就用它原檔第二行以後的起點
+  const cont=it.rows.length>1 ? Math.min(...blk[it.rows[1]].map(s=>s.x)) : first.x;
+  const xText = !mark ? cont : (m && m[2]) ? mark.x+textW(mark.t, mark)
+                       : (it.segs[mi+1] ? it.segs[mi+1].x : mark.x);
+  const runs=[];
+  if(mark && m && m[2]) runs.push({...it.mark, t:m[2], w:0});     // 黏著內文拆成兩段
+  if(mi>=0) runs.push(...it.segs.slice(mi+1));
+  // 註整段只在右半頁時（員工人數），起點與換行都要回到它自己那一半，不是從左半重新起算
+  const k0=Math.min(N-1, Math.floor(first.x/pageW));
+  const out=[]; let k=k0, y=y0, x=first.x, line=[], buf='', bufX=x, st=null;
+  const emit=()=>{ if(buf){ line.push({...st, t:buf, x:bufX, y, w:0}); buf=''; } bufX=x; };
+  const nextHalf=()=>{ emit(); k++; x=lo(k); bufX=x; };
+  const nextLine=ind=>{ emit(); if(line.length) out.push(Object.assign(line,{y}));
+                        line=[]; y+=lh; k=k0; x=ind; bufX=x; };
+  const goto_=nx=>{ emit(); if(x<nx){ x=nx; bufX=x; } };
+  const same=(a,b)=>a&&b&&a.sz===b.sz&&!a.b===!b.b&&!a.s===!b.s&&a.hid===b.hid&&a.sf===b.sf;
+  // 數字／英文整串不斷開（金額被切一半就看不懂了），中文逐字斷
+  const toks=t=>t.match(/[0-9A-Za-z][0-9A-Za-z,.\-\/%]*|[\s\S]/g)||[];
+  const add=(t,sty)=>{
+    if(!same(st,sty)){ emit(); st=sty; }
+    for(const tk of toks(t)){
+      const w=textW(tk,sty);
+      // 放不下就換半頁；最後一個半頁也滿了就換行。
+      // 收尾符號（，。）不落行首：不換行，讓它擠在行尾（追い込み），比孤零零掉到下一行好看
+      if(!NO_START.test(tk[0]))
+        for(let g=0; g<N && x+w>hi(k)+.5 && x>lo(k); g++){
+          // 開頭符號（「（ ）不落行尾：拆下來跟下一行一起排
+          let carry='';
+          if(buf && NO_END.test(buf.slice(-1))){ carry=buf.slice(-1); buf=buf.slice(0,-1); x-=textW(carry,sty); }
+          k<N-1 ? nextHalf() : nextLine(xText);
+          if(carry){ buf=carry; x+=textW(carry,sty); }
+        }
+      if(!buf && !line.length && /^\s+$/.test(tk)) continue;      // 行首的空白丟掉
+      buf+=tk; x+=w;
+    }
+  };
+  // 「註：」開頭的前綴跟第一條同排；前綴太寬（比內文欄寬）就讓條號自己一行。
+  // 門檻要比「內文欄」寬才算長前綴——「註：」本來就會稍微越過條號欄（實測 22pt vs 20.8pt），
+  // 拿條號欄當門檻會把每一份註的「註：」都推成獨立一行。
+  const preW=pre.reduce((a,s)=>a+textW(s.t,s),0);
+  pre.forEach(s=>add(s.t,s));
+  if(mark){
+    if(preW > xText-mark.x) nextLine(mark.x); else goto_(mark.x);
+    add(mark.t, mark); goto_(xText);
+  }
+  runs.forEach(s=>add(s.t,s));
+  emit(); if(line.length) out.push(Object.assign(line,{y}));
+  return out;
+}
+
+// 文字節點與屬性值都用它，所以雙引號一起跳脫（原檔字型名帶引號會把 data-sf 屬性提前收掉）
+const esc=t=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+// Shift+Enter 換行：contentEditable 預設會塞 <br>／<div>，取 textContent 時就沒了換行。
+// .seg 是 white-space:pre，自己插一個換行字元最單純，存回資料也直接帶著 \n。
+function insertNL(){
+  const s=getSelection(); if(!s.rangeCount) return;
+  const r=s.getRangeAt(0); r.deleteContents();
+  const n=document.createTextNode('\n'); r.insertNode(n);
+  r.setStartAfter(n); r.collapse(true); s.removeAllRanges(); s.addRange(r);
+}
+// half = 只輸出落在第幾個半頁的片段，x 也換算成該半頁的座標
+// 同列內部的基線落差不隨列高縮放：那是字型本身的落差，跟著列高放大就變成「數字整個偏移」。
+function segs(r, top, rel, pgno, dy=0, path='', half=0){
+  // 同列的數字看起來比最左的中文往下掉，實測有兩個成因，勾「文字置中」時一起修：
+  //   1. 原檔基線本來就有落差（實測數字比中文低 0.75～1.5pt）
+  //   2. 字級／字體不同（中文 11pt 正黑、數字 10pt 明體），共用基線時小字重心偏低
+  // 做法：整列拉到同一條基線 r.y，再讓各段對齊「基準段的字框中線」——
+  // 基準＝列內字級最大的那段（通常是最左的中文）。同字級同字體的列位置不變。
+  // 只調表身列，頁首／表尾註照原檔。
+  const ref = vmid.checked && rel ? r.reduce((a,s)=>s.sz>a.sz?s:a) : null;
+  const cen = ref && baseOff(ref)-ref.sz/2;
+  const off = s => ref ? cen+s.sz/2 : baseOff(s);
+  // 地線以下（頁尾）孤立的純數字視為頁碼，換成新頁次（對開時左右各自算）
+  const pn=s=>pgno&&r.y>bottomY&&r.length<=2&&/^\d+$/.test(s.t);
+  const txt=s=>pn(s) ? String(pgno+Math.floor(s.x/pageW)) : s.t;
+  return r.map((s,k)=>[s,k]).filter(([s])=>Math.floor(s.x/pageW)===half)
+    .map(([s,k])=>`<span class=seg ${s.hid?`data-lt="${s.hid}"`:''} ${pn(s)?'':`data-p="${path},${k}"`} ${s.w?`data-w="${s.w}"`:''}${s.sf?` data-sf="${esc(s.sf)}"`:''} style="left:${s.x-half*pageW}pt;top:${(rel?dy+(ref?0:s.y-r.y):s.y+dy)-off(s)}pt;font-size:${s.sz}pt;line-height:${s.sz}pt${s.b?';font-weight:700':''}${segFont(s)?';font-family:'+segFont(s):''}">${esc(txt(s))}</span>`).join('');
+}
+
+// ── 畫面縮放：只縮預覽，列印一律 100%（見 @media print）──
+// 用 CSS zoom 而非 transform：版面寬高會跟著縮，捲軸範圍才正確。
+// 代價是所有「量畫面 → 換算 pt」的地方都要除以 zm（fitWidths、自由編輯拖曳）。
+let zm=1, fitMode=0;
+function fit(m){
+  fitMode=m;
+  // 分段控制項要標出「現在是哪一種」，不然三顆看起來一模一樣
+  for(const b of ctl.querySelectorAll('[data-fit]')) b.classList.toggle('on',b.dataset.fit===String(m));
+  const sh=out.querySelector('.sheet');
+  if(!m || !sh) return setZoom(1);
+  const pgs=[...sh.querySelectorAll('.page')];
+  // 對開表一張 sheet 裡是左右兩頁，寬度要算兩頁加中間 4px 間隙
+  const w=pgs.reduce((a,p)=>a+p.offsetWidth,0)+(pgs.length-1)*4;
+  const avail = m==='w' ? out.clientWidth*zm-16 : innerHeight-ctl.offsetHeight-34;
+  if(avail<40) return;                   // 視窗被縮到看不見（或分頁在背景）時不要亂縮
+  setZoom(avail/(m==='w'?w:pgs[0].offsetHeight));
+}
+// 分頁列不跟著紙縮放：它排在 #out 裡面（要對齊紙張中心），但那是操作介面、不是紙的一部分，
+// 外面的 zoom 用倒數抵掉——「符合頁寬」縮到 30% 時字還是原來的大小，不會跟著紙一起變小。
+// zoom 1 時不寫 inline，維持原本的 1:1。
+const zoomBars=()=>out.querySelectorAll('.brk').forEach(b=>b.style.zoom = zm===1 ? '' : String(1/zm));
+const setZoom=z=>{ zm=Math.max(.1,Math.min(4,z)); out.style.zoom=zm===1?'':zm; zoomBars(); };
+// 側欄用 sticky 貼在工具列下方，工具列換行時高度會變，量到 --ctlH 給 CSS 用
+const syncCtlH=()=>document.documentElement.style.setProperty('--ctlH', ctl.offsetHeight+'px');
+addEventListener('resize',()=>{ syncCtlH(); fitMode&&fit(fitMode); });
+syncCtlH();
+fit(0);                     // 開機縮放是 100%，先把「100%」那顆標起來
+// 介面主題：只換工具列與面板的配色（頁面是紙，一律白底黑字）
+const THEME_KEY='prs:theme';
+function setTheme(dark){
+  document.body.classList.toggle('dark', dark);
+  btheme.textContent = dark ? T('🌙 深色','🌙 Dark') : T('☀ 亮色','☀ Light');
+  try{ localStorage.setItem(THEME_KEY, dark?'dark':'light'); }catch(e){}
+}
+let themeSaved=null; try{ themeSaved=localStorage.getItem(THEME_KEY); }catch(e){}
+setTheme(themeSaved ? themeSaved==='dark'
+                    : matchMedia('(prefers-color-scheme: dark)').matches);   // 沒設定過就跟系統走
+btheme.onclick=()=>setTheme(!document.body.classList.contains('dark'));
+sideTog.onclick=()=>{ document.body.classList.toggle('sideOff');
+  sideTog.textContent=T(document.body.classList.contains('sideOff')?'▶ 設定':'◀ 設定',
+                        document.body.classList.contains('sideOff')?'▶ Settings':'◀ Settings');
+  fitMode&&fit(fitMode); };
+
+// ── 檢查：被線壓到的字、原檔的白字／極淡字 ────────────────────────
+// 白字要從 operator list 拿：getTextContent 不帶顏色，而 pdf.js 會把各種顏色空間
+// 都正規化成 setFillRGBColor(0-255)，showText 的 glyph 帶 unicode，湊得出「哪串字是白的」。
+// ponytail: 用字串比對回原本的文字方塊——getTextContent 會併字，索引對不起來（實測差很多）。
+async function pale(pg){
+  const ops=await pg.getOperatorList(), OPS=U.OPS, out=[];
+  let col=[0,0,0], st=[];
+  for(let i=0;i<ops.fnArray.length;i++){
+    const fn=ops.fnArray[i], a=ops.argsArray[i];
+    if(fn===OPS.save) st.push(col);
+    else if(fn===OPS.restore) col=st.pop()||col;
+    else if(fn===OPS.setFillRGBColor) col=[a[0],a[1],a[2]];
+    else if(fn===OPS.showText || fn===OPS.showSpacedText){
+      const lt=Math.min(...col);
+      if(lt<128) continue;                             // 深色字一律不算，門檻拉到底也不會冒出來
+      const t=(a[0]||[]).map(g=>g&&typeof g==='object'?g.unicode||'':'').join('').trim();
+      if(t) out.push({t, lt});
+    }
+  }
+  return out;
+}
+// 把淡色字串比對回文字方塊：原檔一段可能被 pdf.js 併成一段或拆成好幾段，兩邊互相包含就算。
+// ponytail: 只能靠字串——operator list 沒有座標，要算得追 Tm/Td 與字寬，等於自己寫一套排版引擎。
+// 所以同一頁有同樣內容的黑字時會一起標到，門檻與最後判斷交給使用者（工具列的白字門檻）。
+let paleV=[];
+const markPale = (rows,ps) => { ps.forEach(x=>paleV.push(x.lt));
+  if(ps.length) rows.forEach(r=>r.forEach(s=>{
+    const t=s.t.trim();
+    ps.forEach(x=>{ if(x.lt>(s.hid||0) && (x.t.length>1 ? (x.t.includes(t)||t.includes(x.t)) : t===x.t)) s.hid=x.lt; });
+  }));
+  return rows; };
+
+let chkOn=false;
+ovTol.oninput = whThr.oninput = () => chkOn && scan();
+// 全部在本機跑、什麼都不上傳，所以拿不到「使用者實際丟了什麼檔」。折衷：讓使用者自己
+// 複製一行結構統計去回報。只有數字與尺寸，不含任何原檔文字。
+diagB.onclick = async () => {
+  if(!units.length && !fpages.length) return;
+  const spanN = frame.filter(l=>!l.h && l.w > pageW*.8).length;
+  const d = [
+    `pages=${breaks.length}`, `paper=${pageW}x${H}${mixedSize?`(mixed:${mixedSize})`:''}`,
+    `spread=${spread.checked?1:0}`, `fromPg=${fromPg.value}`,
+    `frameLines=${frame.length}`, `spanning=${spanN}`, `noFrame=${noFrameDoc?1:0}`,
+    `rows=${rows.length}`, `units=${units.length}`,
+    `notes=${note.reduce((a,p)=>a+p.length,0)}`, `head=${head.reduce((a,p)=>a+p.length,0)}`,
+    `LH=${LH.toFixed(1)}`, `top=${Math.round(topY)}`, `bot=${Math.round(bottomY)}`,
+    `warn=${loadWarn.length}`
+  ].join(' ');
+  try{ await navigator.clipboard.writeText(d); cmsg.textContent=T('已複製','Copied'); }
+  catch(e){ cmsg.textContent=d; }                 // 剪貼簿被擋就直接印出來讓人自己選取
+  setTimeout(()=>{ if(cmsg.textContent===T('已複製','Copied')) cmsg.textContent=''; }, 2000);
+};
+function chk(){ chkOn=!chkOn; document.body.classList.toggle('chk',chkOn); chkB.classList.toggle('pri',chkOn); scan(); }
+function scan(){
+  out.querySelectorAll('.ovl').forEach(e=>e.classList.remove('ovl'));
+  if(!chkOn){ out.querySelectorAll('.wht').forEach(e=>e.classList.remove('wht')); return cmsg.textContent=''; }
+  const thr=+whThr.value||230, tol=(+ovTol.value||0)*96/72;
+  let n=0;
+  out.querySelectorAll('.page').forEach(pgEl=>{
+    const ls=[...pgEl.querySelectorAll('.ln')].map(e=>[e.offsetLeft,e.offsetTop,e.offsetWidth,e.offsetHeight]);
+    if(!ls.length) return;
+    pgEl.querySelectorAll('.seg').forEach(e=>{
+      const sc=+(/scaleX\(([\d.]+)\)/.exec(e.style.transform)||[0,1])[1];
+      const h=e.offsetHeight;
+      // 只算字身（上下各留一截行距），再依容許值往內縮，不然貼著欄線的字每一格都會中
+      const x=e.offsetLeft+tol, w=e.offsetWidth*sc-tol*2, y=e.offsetTop+h*.2+tol, hh=h*.65-tol*2;
+      if(w<=0||hh<=0) return;
+      if(ls.some(([lx,ly,lw,lh])=>lx<x+w && lx+lw>x && ly<y+hh && ly+lh>y)){ e.classList.add('ovl'); n++; }
+    });
+  });
+  let m=0;
+  out.querySelectorAll('[data-lt]').forEach(e=>{ const on=+e.dataset.lt>=thr; e.classList.toggle('wht',on); m+=on; });
+  const pn=paleV.filter(v=>v>=thr).length;
+  cmsg.textContent=T(`字被線壓到 ${n} 處・原檔白字 ${pn} 段`,`${n} clipped by rules · ${pn} white runs in source`)
+    +(pn&&m!==pn?T(`（標出 ${m} 處）`,` (${m} marked)`):'');
+}
+
+// ── 搜尋：逐個文字方塊比對（PDF 的一段字就是一個 .seg）──
+// ponytail: 不跨方塊比對——原檔常把一句話切成好幾段，跨段比對要先重組全文再對回 DOM，
+// 目前用不到；真的要搜跨段的詞再說。
+let hits=[], hi=-1;
+function doFind(reset=true){
+  out.querySelectorAll('.hit').forEach(e=>e.classList.remove('hit','cur'));
+  const q=fq.value.trim().toLowerCase();
+  hits=[]; if(!q) return fmsg.textContent='';
+  out.querySelectorAll('.seg').forEach(e=>{
+    if(e.textContent.toLowerCase().includes(q)){ e.classList.add('hit'); hits.push(e); }
+  });
+  if(reset || hi>=hits.length) hi=hits.length?0:-1;
+  showHit(reset);
+}
+function showHit(scroll=true){
+  fmsg.textContent = hits.length ? `${hi+1}/${hits.length}` : (fq.value.trim()?T('找不到','no match'):'');
+  hits.forEach(e=>e.classList.remove('cur'));
+  const e=hits[hi]; if(!e) return;
+  e.classList.add('cur');
+  if(scroll) e.scrollIntoView({block:'center'});
+}
+const step=d=>{ if(!hits.length) return; hi=(hi+d+hits.length)%hits.length; showHit(); };
+fq.oninput=()=>doFind();
+fq.onkeydown=e=>{ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); step(e.shiftKey?-1:1); } };
+
+// 系統字型的字寬跟原檔內嵌字型不同，數字排出來會比原本寬、壓到欄線上。
+// 量完之後把每段橫向壓回原檔寬度（只縮不放，從左緣起算，右對齊的數字才不會跑掉）。
+function fitWidths(){
+  const els=[...out.querySelectorAll('.seg[data-w]')];
+  const scale=els.map(el=>{
+    const w0=+el.dataset.w, w1=el.getBoundingClientRect().width*72/96/zm;
+    return w0>0 && w1>w0*1.005 ? w0/w1 : 0;                 // 先全部量完再寫，避免反覆重排
+  });
+  els.forEach((el,i)=>{ if(scale[i]){
+    el.style.display='inline-block';
+    el.style.transformOrigin='left top';
+    el.style.transform=`scaleX(${scale[i].toFixed(4)})`;
+  }});
+  if(fitMode) fit(fitMode);            // 換檔／切對開後頁寬變了，縮放要重算
+  if(fq.value.trim()) doFind(false);  // DOM 重建過，命中標記要重標
+  if(chkOn) scan();
+}
+
+// ── 對齊：⌥ 點格選取（可多選），再按對齊鈕，像 PPT 對齊文字方塊 ──
+const selSeg=new Set();
+const PT=el=>{ const pg=el.closest('.page');
+  return el.getBoundingClientRect().width / (pg.getBoundingClientRect().width/parseFloat(pg.style.width)); };
+
+function align(mode){
+  if(freeMode.checked) return alignFree(mode);
+  // 對開時同一格會有左右兩份 DOM（右半是複本），依 data-p 去重
+  const seen=new Set(), els=[...out.querySelectorAll('.seg.pick')]
+    .filter(el=>!seen.has(el.dataset.p) && seen.add(el.dataset.p));
+  if(els.length<(mode==='col'?1:2)) return alert(T(`按住 ${KALT} 點選要對齊的格子，至少兩格`,`Hold ${KALT} and click the cells to align — at least two`));
+  const sheets=[...out.querySelectorAll('.sheet')];
+  const box=els.map(el=>({p:el.dataset.p, x:seg0(el.dataset.p).x, w:PT(el),
+                          pi:sheets.indexOf(el.closest('.sheet'))}));
+  push();
+  alignX(mode, box, (b,x)=>setX(b.p,x), b => (frames[b.pi]||frame).filter(l=>l.h).map(l=>l.x));
+  selSeg.clear(); render();
+}
+
+// 自由編輯：對齊目前選取的物件（文字方塊、線條都可以，都是整個搬移）
+function alignFree(mode){
+  const ids=[...fsels];
+  if(ids.length<(mode==='col'?1:2)) return alert(T('先選要對齊的物件，至少兩個','Select the objects to align first — at least two'));
+  // 文字方塊的寬度要量畫面（原檔字寬壓縮過），線條直接用自己的長度（直線是 0）
+  const box=ids.map(id=>{ const o=fobj(id);
+    return {o, pi:+id.split(',')[1], x:o.x, w:o.sz?PT(fel(id)):(o.w||0)}; });
+  fpush();
+  alignX(mode, box, (b,x)=>b.o.x=x, b => fpages[b.pi].l.filter(l=>l.h).map(l=>l.x));
+  renderFree();
+}
+
+// 兩種模式共用的水平對齊運算：box 是 {x,w} 陣列，setx 寫回，cols 給「依欄線置中」用
+function alignX(mode, box, setx, cols){
+  const L=Math.min(...box.map(b=>b.x)), R=Math.max(...box.map(b=>b.x+b.w));
+  if(mode==='l') box.forEach(b=>setx(b, L));
+  if(mode==='r') box.forEach(b=>setx(b, R-b.w));
+  if(mode==='c') box.forEach(b=>setx(b, (L+R)/2-b.w/2));
+  if(mode==='d'){                                  // 中心點等距分佈，頭尾不動
+    box.sort((a,b)=>a.x-b.x);
+    const c0=box[0].x+box[0].w/2, cN=box.at(-1).x+box.at(-1).w/2;
+    box.forEach((b,i)=>setx(b, c0+(cN-c0)*i/(box.length-1)-b.w/2));
+  }
+  if(mode==='col') box.forEach(b=>{                // 以左右兩條欄線置中
+    const vs=cols(b).sort((a,b)=>a-b);
+    const lo=Math.max(...vs.filter(v=>v<=b.x+2), 0), hi=Math.min(...vs.filter(v=>v>=b.x+b.w-2), W);
+    setx(b, (lo+hi)/2-b.w/2);
+  });
+}
+// data-p = 「u|h|n, 群組/頁索引, 列, 段」；n 的頁索引是原檔的頁，不是輸出的頁
+const owner=(k,a)=> k==='u' ? units[a] : k==='n' ? note[a] : head[a];
+const seg0=p=>{ const [k,a,b,c]=p.split(','); return owner(k,a)[b][c]; };
+function setX(p,x){
+  const [k,a,b,c]=p.split(',');
+  const o = owner(k,a);
+  o[b] = Object.assign(o[b].map((s,i)=>i==c?{...s,x}:s), {y:o[b].y});
+}
+
+// ── 就地編輯：勾選「編輯」後點格子改字，Enter 或點別處存檔、Esc 放棄 ──
+function bindEdit(){
+  out.querySelectorAll('.seg[data-p]').forEach(el=>{
+    if(selSeg.has(el.dataset.p)) el.classList.add('pick');
+    el.onclick=ev=>{
+      if(ev.altKey){                               // ⌥/Alt 點：選格子做對齊
+        ev.stopPropagation(); ev.preventDefault();
+        selSeg.has(el.dataset.p) ? selSeg.delete(el.dataset.p) : selSeg.add(el.dataset.p);
+        out.querySelectorAll(`.seg[data-p="${el.dataset.p}"]`)
+           .forEach(x=>x.classList.toggle('pick', selSeg.has(el.dataset.p)));
+        status(); return;
+      }
+      if(editMode.checked) edit(el, ev);           // 編輯模式：點一下就改字
+      // 否則不攔截，交給整列的點擊去做選取
+    };
+    el.ondblclick=ev=>edit(el, ev);                // 沒開編輯模式時，雙擊仍然可以改
+  });
+}
+
+function edit(el, ev){
+      if(el.isContentEditable) return;
+      ev.stopPropagation();
+      const row=el.closest('.row'); if(row) row.draggable=false;
+      const old=el.textContent;
+      el.contentEditable='true'; el.classList.add('editing'); el.focus();
+      getSelection().selectAllChildren(el);
+      const done=ok=>{
+        el.contentEditable='false'; el.classList.remove('editing');
+        const t=el.textContent;
+        if(!ok || t===old){ el.textContent=old; if(row) row.draggable=true; return; }
+        push(); setSeg(el.dataset.p, t); render();
+      };
+      el.onblur=()=>done(true);
+      el.onkeydown=e=>{
+        e.stopPropagation();
+        if(e.key==='Enter'){ e.preventDefault();
+      // Shift+Enter 換行：.seg 是 white-space:pre，插一個換行字元就會斷行；Enter 維持存檔
+      e.shiftKey ? insertNL() : el.blur(); }
+        if(e.key==='Escape'){ el.textContent=old; el.blur(); }
+      };
+}
+// data-p = "u,單位,行,片段" 或 "h,頁,列,片段"
+// 改字時整列換成新物件（copy-on-write），舊快照才留得住原文，復原才有效
+function setSeg(p,t){
+  const [k,a,b,c]=p.split(',');
+  const o = owner(k,a);
+  // 改過字之後原本的寬度就不適用了，拿掉才不會把新字硬壓成舊寬度
+  o[b] = Object.assign(o[b].map((s,i)=>i==c?{...s,t,w:0}:s), {y:o[b].y});
+}
+
+// ── 選取與群組：選連續的 2 列以上組成群組，之後一起搬、不會被分頁拆開 ──
+function group(){
+  const ix=[...sel].sort((a,b)=>a-b);
+  if(ix.length<2) return alert(T('請先選兩列以上（點一下起點，Shift 點終點）','Select at least two rows first (click the start, Shift-click the end)'));
+
+  push();
+  const merged=[].concat(...units.slice(ix[0],ix[0]+ix.length));
+  units.splice(ix[0], ix.length, merged);
+  const mapB=b=>b>ix[0] ? Math.max(ix[0]+1, b-(ix.length-1)) : b;
+  breaks=breaks.map(mapB);
+  breaks=breaks.filter((b,i)=>b>(i?breaks[i-1]:0));   // 群組跨越分頁時多個 break 會夾到同一格，清掉空頁
+  remapLocks(mapB);
+  sel.clear(); render();
+}
+function ungroup(){
+  if(!sel.size) return;
+  push();
+  [...sel].sort((a,b)=>b-a).forEach(i=>{
+    const u=units[i]; if(u.length<2) return;
+    units.splice(i,1,...u.map(r=>[r]));
+    const mapB=b=>b>i ? b+(u.length-1) : b;
+    breaks=breaks.map(mapB); remapLocks(mapB);
+  });
+  sel.clear(); render();
+}
+// unit 索引一變（群組／解群），鎖住的分頁點要跟著平移，只留仍是分頁點的那些
+function remapLocks(mapB){
+  const next=[...locks].map(mapB).filter(b=>breaks.includes(b));
+  locks.clear(); next.forEach(b=>locks.add(b));
+}
+
+function paintSel(){
+  out.querySelectorAll('.row').forEach(e=>e.classList.toggle('sel', sel.has(+e.dataset.i)));
+  status();
+}
+
+let dragI=null, lastI=null;
+function bindDrag(){
+  out.querySelectorAll('.row').forEach(e=>{
+    const i=+e.dataset.i;
+    // 選取一律是連續範圍：點一下設起點，Shift 點另一列拉出整段
+    // 注意：這裡只換 class，不能整個 render()——重畫會把 DOM 換掉，
+    // 第二次點擊落在新元素上，雙擊編輯就永遠觸發不了。
+    e.onclick=ev=>{
+      sel.clear();
+      if(ev.shiftKey && lastI!==null)
+        for(let k=Math.min(i,lastI);k<=Math.max(i,lastI);k++) sel.add(k);
+      else { sel.add(i); lastI=i; }
+      paintSel();
+    };
+    e.ondragstart=()=>dragI=i;
+    e.ondragover=ev=>ev.preventDefault();
+    e.ondrop=ev=>{
+      ev.preventDefault();
+      if(dragI===null||i===dragI) return;
+      push();
+      const [u]=units.splice(dragI,1); units.splice(i,0,u);
+      sel.clear(); render();
+    };
+  });
+}
+
+
+// ── 列印前提醒：輸出不會沿用原檔內嵌字型 ──────────────────────
+// 版面（座標、字級、字寬）都照原檔還原，但字形是本機字型重排的。Acrobat 打開會看到
+// 換成了 PingFang TC 之類的字，先講清楚，免得以為是工具把檔案改壞了。
+// ponytail: 每載入一個檔提醒一次就好，不做「不再提醒」開關
+let fontWarned=false;
+// document.fonts.check() 對沒裝的字型也會回 true（實測 Mac 上「微軟正黑體」回 true），
+// 只能靠量字寬：同一串字用「該字型＋備援」和「單獨備援」量，一樣寬就代表沒這套字。
+const hasFont = f => {
+  const c=document.createElement('canvas').getContext('2d');
+  const w=fam=>{ c.font=`40px ${fam}`; return c.measureText('永A0永').width; };
+  return w(`"${f}",monospace`)!==w('monospace') || w(`"${f}",serif`)!==w('serif');
+};
+const CJK=['微軟正黑體','Microsoft JhengHei','PingFang TC','Heiti TC'];
+function doPrint(){
+  if(fontWarned) return print();
+  const have=CJK.find(hasFont);
+  const hasCJK=rows.concat(head.flat(),note.flat()).flat().some(t=>/[\u4e00-\u9fff]/.test(t.t||''));
+  const list=[...srcFonts].sort();
+  // 純拉丁文件（原檔沒有中文字）不必講中文字型那一行
+  const msg=T('輸出的 PDF 不會沿用原檔的內嵌字型，是用本機字型重新排版的：\n\n',
+              'The exported PDF does not keep the source\u2019s embedded fonts — it is re-set with fonts installed on this machine:\n\n')
+    + (fontAll
+        ? T(`　整份字型　　${fontAll}${hasFont(fontAll)?'':'　⚠本機沒有，會用系統字型替代'}\n`,
+            `　Document font　${fontLabel(fontAll)}${hasFont(fontAll)?'':'　⚠ not installed, a system font will stand in'}\n`)
+        : (hasCJK
+            ? T(`　中文　　　${have||'（本機沒有正黑體，會用系統預設中文字型）'}\n　數字／英文　Times New Roman\n`,
+                `　Chinese　　${have?fontLabel(have):'(no gothic face here; the system default will be used)'}\n　Latin / digits　Times New Roman\n`)
+            : T('　字型　　　Times New Roman／Arial\n','　Fonts　　Times New Roman / Arial\n')))
+    + (list.length ? T(`　原檔字型　　${list.slice(0,6).join('、')}${list.length>6?` 等 ${list.length} 種`:''}\n\n`,
+                       `　Source fonts　${list.slice(0,6).join(', ')}${list.length>6?` and ${list.length-6} more`:''}\n\n`):'')
+    + T('每段字寬都壓回了原檔寬度，版面不會跑掉，但字形細節與原檔不同。要繼續嗎？',
+        'Every run is scaled back to its source width, so the layout holds; only the letterforms differ. Continue?');
+  if(!confirm(msg)) return;
+  fontWarned=true; print();
+}
+
+// ── 換字型：只給常見的那幾套，選單一律列出來，本機沒裝的標 ⚠（在別台機器印還是對的） ──
+// 字型堆疊一律用單引號：它會被塞進 style="…" 屬性裡，雙引號會把屬性提前結束掉
+// [key, 字型堆疊, 英文選單標籤]。key 會寫進自由編輯的 .json，不能改。
+const FONTS=[['微軟正黑體',"'微軟正黑體','Microsoft JhengHei',sans-serif",'Microsoft JhengHei'],
+             ['標楷體',"'標楷體','DFKai-SB','BiauKai',serif",'DFKai-SB (Kai)'],
+             ['新細明體',"'新細明體','PMingLiU','MingLiU',serif",'PMingLiU (Ming)'],
+             ['Times New Roman',"'Times New Roman',Times,serif"],
+             ['Georgia',"Georgia,'Times New Roman',serif"],
+             ['Arial',"Arial,Helvetica,sans-serif"],
+             ['Helvetica',"Helvetica,Arial,sans-serif"],
+             ['Calibri',"Calibri,'Segoe UI',sans-serif"],
+             ['Courier New',"'Courier New',Courier,monospace"]];
+const famOf = n => (FONTS.find(f=>f[0]===n)||[])[1];
+const fontLabel = n => { const f=FONTS.find(f=>f[0]===n); return LANG==='en'&&f&&f[2] ? f[2] : n; };
+// 整份字型：一般模式套用到全部文字（rows／head／note 都換），進自由編輯時寫成 f 一起存檔
+// 換語言時整份重建，選到的值自己存回去
+function fillFonts(){
+  const opts=`<option value="">${T('（原樣）','(as-is)')}</option>`
+    + FONTS.map(([n])=>`<option value="${n}">${fontLabel(n)}${hasFont(n)?'':T(' ⚠本機無',' ⚠ not installed')}</option>`).join('');
+  for(const sl of [fontSel,fnAll]){ const v=sl.value; sl.innerHTML=opts; sl.value=v; }
+}
+fillFonts();
+fnAll.onchange = () => { fontAll=fnAll.value; units.length && render(); };
+fontSel.onchange = () => {
+  const ids=[...fsels].filter(id=>catOf(id)==='t');
+  if(!ids.length) return;
+  fpush();
+  // 換了字型，原檔字寬就不適用了（不清掉會被 fitWidths 壓回舊寬度，等於白換）
+  ids.forEach(id=>{ const o=fobj(id); o.f=fontSel.value||undefined; o.w=0; });
+  renderFree();
+};
+
+// ── 自由編輯模式 ─────────────────────────────────────────────
+// 完全不碰分列／分頁／排序：每一頁原樣攤開，文字方塊（每個 PDF 文字片段）與線條
+// 各自是可搬可改的獨立物件。兩類用「選取對象」互斥選取，免得改線時誤拖到字。
+// ponytail: 只做搬移／改字／改線長粗細／刪除，不做新增物件，要新增再說。
+let fpages=[], fsels=new Set(), fundoS=[], fredoS=[];
+const catOf = id => id[0];
+
+freeMode.onchange = () => {
+  if(fundoS.length && !freeMode.checked && !confirm(T('離開自由編輯會重新載入原檔，目前的搬移／改字都會清掉。要繼續嗎？',
+      'Leaving free edit reloads the source file — the moves and text edits you have made will be discarded. Continue?')))
+    return freeMode.checked=true;
+  // 從 .json 存檔還原的沒有原始 PDF，退不回一般模式
+  if(!freeMode.checked && fpages.length && !buf){
+    freeMode.checked=true; return alert(T('這是從 .json 存檔還原的，沒有原始 PDF 可以退回一般模式。','This was restored from a .json save — there is no original PDF to return to normal mode with.')); }
+  document.body.classList.toggle('free', freeMode.checked);
+  fsels.clear(); fundoS=[]; fredoS=[];
+  // 進自由編輯時接手畫面上調好的版面（分頁、列高、備註都已經算進去），不重讀原檔把它作廢
+  if(freeMode.checked && units.length) return freeFromLayout();
+  buf && queueLoad();
+};
+
+// 直接讀畫好的 DOM：位置都是 pt，所見即所得，不必把 render() 的數學（列高、平移、置中）再算一次。
+// 對開時一個半頁就是一張紙，攤平後剛好是列印出來的樣子。
+function freeFromLayout(){
+  fpages = [...out.querySelectorAll('.page')].map(pg=>({
+    w:pageW, h:H, l:pg.__ln||[],
+    t:[...pg.querySelectorAll('.seg')].map(e=>{
+      const st=e.style, sz=parseFloat(st.fontSize);
+      const b=st.fontWeight==='700'?1:0, s=/serif/.test(st.fontFamily)?1:0;
+      // 表身的字包在 .row 裡、top 是相對列的，要加上列本身的位置；頁首與註直接掛在頁上
+      const par=e.parentElement, dy=par.classList.contains('row')?parseFloat(par.style.top):0;
+      const o={ x:parseFloat(st.left), y:parseFloat(st.top)+dy+baseOff({sz, b, s, sf:e.dataset.sf||''}),  // 存回基線（ftop 會再減一次）
+                t:e.textContent, sz, b, s, sf:e.dataset.sf||'', w:+e.dataset.w||0 };
+      if(e.dataset.lt) o.hid=+e.dataset.lt;
+      return o;
+    })
+  }));
+  // 整份字型在一般模式只是顯示覆蓋，進自由編輯要落地成 f，存檔才帶得走
+  if(fontAll) fpages.forEach(p=>p.t.forEach(s=>s.f=fontAll));
+  W=pageW;
+  pagesize.textContent=`@page{size:${pageW}pt ${H}pt;margin:0}`;
+  renderFree();
+}
+
+// ── 自由編輯存檔：fpages 本身就是完整快照（文字、線條、字型全在裡面），還原不必帶原始 PDF ──
+let freeName='';
+function saveFree(){
+  if(!fpages.length) return;
+  const name=(buf?.name||freeName||'free').replace(/\.(pdf|json)$/i,'');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify({v:1, pageW, H, name, fpages})],{type:'application/json'}));
+  a.download=name+'.json';
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+async function loadSaved(file){
+  let d; try{ d=JSON.parse(await file.text()); }catch(e){ return fail(T('這個 .json 讀不出來：','Could not read this .json: ')+e.message); }
+  if(!d || !Array.isArray(d.fpages) || !d.fpages.length) return fail(T(`「${file.name}」不是自由編輯的存檔`,`"${file.name}" is not a free-edit save`));
+  fpages=d.fpages; pageW=W=d.pageW||fpages[0].w; H=d.H||fpages[0].h;
+  // 舊存檔可能存了部首字元，讀回時一併正規化
+  fpages.forEach(p=>p.t.forEach(s=>s.t=normCJK(s.t)));
+  buf=null; freeName=d.name||file.name;
+  freeMode.checked=true; document.body.classList.add('free');
+  fsels.clear(); fundoS=[]; fredoS=[];
+  pagesize.textContent=`@page{size:${pageW}pt ${H}pt;margin:0}`;
+  err.classList.remove('bad'); err.textContent=''; drop.classList.add('hide');
+  renderFree();
+}
+document.getElementsByName('cat').forEach(r=>r.onchange=()=>setCat(r.value));
+// 切換選取對象時把另一類的選取清掉：兩類本來就不該混在同一次搬移裡
+const setCat = v => { document.body.classList.toggle('cat-t', v==='t');
+  document.body.classList.toggle('cat-l', v==='l');
+  [...fsels].forEach(id=>catOf(id)!==v && fsels.delete(id)); paintFsel(); };
+setCat('t');
+
+async function loadFree(doc){
+  fpages=[]; fsels.clear(); fundoS=[]; fredoS=[]; paleV=[];
+  for(let p=1;p<=doc.numPages;p++){
+    const pg=await doc.getPage(p), vp=pg.getViewport({scale:1});
+    const w=vp.width, h=vp.height;
+    const c=await pg.getTextContent();
+    await pg.getOperatorList();                       // 跑過才拿得到字型（粗體／襯線）
+    const t=[].concat(...markPale(lines(c, h, fonts(pg,c)), await pale(pg))).map(s=>({...s}));
+    fpages.push({w, h, t, l:await getFrame(pg,h)});
+  }
+  pageW=fpages[0].w; W=pageW; H=fpages[0].h;
+  pagesize.textContent=`@page{size:${pageW}pt ${H}pt;margin:0}`;
+  drop.classList.add('hide');
+  renderFree();
+}
+
+const fobj = id => { const [k,p,i]=id.split(','); return k==='l' ? fpages[p].l[i] : fpages[p].t[i]; };
+const ftop = o => o.sz ? o.y-baseOff(o) : o.y;
+const fel = id => out.querySelector(`[data-o="${id}"]`);
+
+function renderFree(){
+  out.innerHTML='';
+  fpages.forEach((p,pi)=>{
+    const sheet=document.createElement('div'); sheet.className='sheet';
+    const el=document.createElement('div'); el.className='page';
+    el.style.cssText=`width:${p.w}pt;height:${p.h}pt`;
+    pageW=p.w;                                        // lnBox 用得到（自由模式一頁一版，k=0）
+    capEnds(p.l);                                     // 線被搬過／改過長度，接合狀態要重算
+    el.innerHTML = p.l.map((l,i)=>`<div class=ln data-o="l,${pi},${i}" style="${lnBox(l,0)}"></div>`).join('')
+      + p.t.map((s,i)=>`<span class=seg ${s.hid?`data-lt="${s.hid}"`:''} data-o="t,${pi},${i}" ${s.w?`data-w="${s.w}"`:''}${s.sf?` data-sf="${esc(s.sf)}"`:''} style="left:${s.x}pt;top:${ftop(s)}pt;font-size:${s.sz}pt;line-height:${s.sz}pt${s.b?';font-weight:700':''}${segFont(s)?';font-family:'+segFont(s):''}">${esc(s.t)}</span>`).join('');
+    sheet.appendChild(el);
+    // 表格模式的外框（render()）用 .blk 撐開版面寬度，自由編輯這裡也包一層，兩邊的紙張定位一致
+    const blk=document.createElement('div'); blk.className='blk';
+    blk.appendChild(sheet); out.appendChild(blk);
+  });
+  paintFsel(); bindFree(); fitWidths();
+  msg.textContent=T(`自由編輯　${fpages.length} 頁　${fpages.reduce((n,p)=>n+p.t.length,0)} 個文字方塊　${fpages.reduce((n,p)=>n+p.l.length,0)} 條線`,
+      `Free edit · ${fpages.length} pages · ${fpages.reduce((n,p)=>n+p.t.length,0)} text boxes · ${fpages.reduce((n,p)=>n+p.l.length,0)} lines`)
+    + (fsels.size?T(`　已選 ${fsels.size}`,` · ${fsels.size} selected`):'');
+}
+
+// 搬移時只改這幾個元素的樣式，不整份重畫（重畫 200 頁會頓）
+function place(el,o){
+  if(o.sz){ el.style.left=o.x+'pt'; el.style.top=ftop(o)+'pt'; }
+  else el.style.cssText=lnBox(o,0);
+}
+function paintFsel(){
+  out.querySelectorAll('.fsel').forEach(e=>e.classList.remove('fsel'));
+  fsels.forEach(id=>fel(id)?.classList.add('fsel'));
+  // 線的長／粗只在「剛好選一條線」時可改；多選時留空，避免一次改壞一整組
+  const one = fsels.size===1 && catOf([...fsels][0])==='l' ? fobj([...fsels][0]) : null;
+  lnEd.style.opacity=one?1:.35;
+  lnLen.disabled=lnTh.disabled=!one;
+  if(one){ lnLen.value=+(one.w||one.h).toFixed(2); lnTh.value=+th(one).toFixed(2); }
+  else { lnLen.value=lnTh.value=''; }
+  const ts=[...fsels].filter(id=>catOf(id)==='t');
+  fnEd.style.opacity=ts.length?1:.35; fontSel.disabled=!ts.length;
+  const fs=new Set(ts.map(id=>fobj(id).f||''));
+  fontSel.value = fs.size===1 ? [...fs][0] : '';        // 多選字型不一致時留空白，選了才一起套
+  delObj.disabled=!fsels.size; fbu.disabled=!fundoS.length; fbr.disabled=!fredoS.length;
+  if(fpages.length) msg.textContent=msg.textContent.replace(/(　已選 \d+| · \d+ selected)$/,'')+(fsels.size?T(`　已選 ${fsels.size}`,` · ${fsels.size} selected`):'');
+}
+
+// ponytail: 快照整份 JSON，最單純也夠用；大檔（數百頁）若卡再改成記單一物件的差異
+const fsnap=()=>JSON.stringify(fpages);
+const fpush=()=>{ fundoS.push(fsnap()); fredoS=[]; if(fundoS.length>60) fundoS.shift(); };
+function fundoF(){ if(!fundoS.length) return; fredoS.push(fsnap()); fpages=JSON.parse(fundoS.pop()); fsels.clear(); renderFree(); }
+function fredoF(){ if(!fredoS.length) return; fundoS.push(fsnap()); fpages=JSON.parse(fredoS.pop()); fsels.clear(); renderFree(); }
+
+function bindFree(){
+  out.querySelectorAll('[data-o]').forEach(el=>{
+    // 線的游標：兩端是拉長度，中間是搬移
+    if(el.classList.contains('ln'))
+      el.onpointermove=ev=>{ const g=endGrab(el,fobj(el.dataset.o),ev);
+        el.style.cursor = !g ? 'move' : fobj(el.dataset.o).w ? 'ew-resize' : 'ns-resize'; };
+    el.onpointerdown=ev=>{
+      if(el.isContentEditable) return;
+      ev.preventDefault();
+      const id=el.dataset.o, o=fobj(id);
+      // 端點判定要在 paintFsel 之前算：工具列的文字一變可能多一列，整個版面會往下位移，
+      // 之後再量元素位置就跟按下去的座標對不起來了
+      const grab=el.classList.contains('ln') && endGrab(el,o,ev);
+      // 加選用 Ctrl/⌘ 點（Shift 留給拖曳鎖方向）；點沒選過的東西就換成只選它
+      if(ev.metaKey||ev.ctrlKey){ fsels.has(id)?fsels.delete(id):fsels.add(id); paintFsel(); return; }
+      if(!fsels.has(id)){ fsels.clear(); fsels.add(id); }
+      paintFsel();
+      if(grab) return dragEnd(el,o,grab,ev);      // 抓到端點：只拉這一條的長度，不搬整組
+      // 多選時整組一起搬，位移量相同
+      const grp=[...fsels].map(i=>({el:fel(i), o:fobj(i)})).filter(g=>g.el)
+                          .map(g=>({...g, ox:g.o.x, oy:g.o.y}));
+      const sx=ev.clientX, sy=ev.clientY;
+      let moved=false, axis=null; fpush();
+      const mv=e=>{
+        let dx=(e.clientX-sx)*72/96/zm, dy=(e.clientY-sy)*72/96/zm;
+        if(!moved && Math.abs(dx)+Math.abs(dy)<.5) return;
+        moved=true;
+        // Shift＝鎖方向：以按下時位移較大的那軸為準，另一軸歸零
+        if(e.shiftKey){ axis=axis||(Math.abs(dx)>=Math.abs(dy)?'x':'y'); }
+        else axis=null;
+        if(axis==='x') dy=0; if(axis==='y') dx=0;
+        grp.forEach(g=>{ g.o.x=g.ox+dx; g.o.y=g.oy+dy; place(g.el,g.o); });
+      };
+      const up=()=>{
+        removeEventListener('pointermove',mv); removeEventListener('pointerup',up);
+        if(!moved) fundoS.pop();                  // 只是點一下選取，不留 undo 紀錄
+        paintFsel();
+      };
+      addEventListener('pointermove',mv); addEventListener('pointerup',up);
+    };
+    if(el.classList.contains('seg')) el.ondblclick=()=>freeEdit(el);
+  });
+}
+
+// 線的兩端 6px 內算「拉長度」，回 -1 頭、1 尾、0 中間（太短的線全部當搬移，不然點不到中間）
+function endGrab(el,o,ev){
+  // 用 clientX 減元素位置算，不用 offsetX：offsetX 在合成事件與縮放下不可靠
+  const r=el.getBoundingClientRect();
+  const len=o.w?r.width:r.height, p=o.w?ev.clientX-r.left:ev.clientY-r.top;
+  if(len<20) return 0;
+  return p<6 ? -1 : p>len-6 ? 1 : 0;
+}
+function dragEnd(el,o,grab,ev){
+  const sx=ev.clientX, sy=ev.clientY, ox=o.x, oy=o.y, ow=o.w, oh=o.h;
+  let moved=false; fpush();
+  const mv=e=>{
+    const d=(o.w ? e.clientX-sx : e.clientY-sy)*72/96/zm;
+    if(!moved && Math.abs(d)<.5) return;
+    moved=true;
+    if(grab>0){ o.w ? o.w=Math.max(1,ow+d) : o.h=Math.max(1,oh+d); }
+    else if(o.w){ const nx=Math.min(ox+d, ox+ow-1); o.x=nx; o.w=ow+ox-nx; }
+    else        { const ny=Math.min(oy+d, oy+oh-1); o.y=ny; o.h=oh+oy-ny; }
+    place(el,o);
+  };
+  const up=()=>{
+    removeEventListener('pointermove',mv); removeEventListener('pointerup',up);
+    if(!moved) return fundoS.pop();
+    renderFree();                                 // 長度變了，交接處要重算
+  };
+  addEventListener('pointermove',mv); addEventListener('pointerup',up);
+}
+
+// 齊頭／齊尾：把選取的線拉到同一個起點／終點（另一端不動）；橫線直線各算各的
+function alignLine(tail){
+  const ls=[...fsels].filter(id=>catOf(id)==='l').map(fobj);
+  if(ls.length<2) return alert(T('先選要對齊的線條，至少兩條','Select the lines to align first — at least two'));
+  fpush();
+  [1,0].forEach(hz=>{
+    const g=ls.filter(o=>hz ? o.w>0 : !(o.w>0));
+    if(g.length<2) return;
+    const s=o=>hz?o.x:o.y, len=o=>hz?o.w:o.h;
+    const v = tail ? Math.max(...g.map(o=>s(o)+len(o))) : Math.min(...g.map(o=>s(o)));
+    g.forEach(o=>{
+      const L=Math.max(1, tail ? v-s(o) : s(o)+len(o)-v);
+      if(!tail){ hz ? o.x=v : o.y=v; }
+      hz ? o.w=L : o.h=L;
+    });
+  });
+  renderFree();
+}
+
+// 框選：在頁面空白處按住左鍵拉出方框，碰到的物件一起選（Ctrl/⌘＝加選）
+out.addEventListener('pointerdown', ev=>{
+  if(!freeMode.checked || ev.button || ev.target.closest('[data-o]')) return;
+  ev.preventDefault();
+  const keep=(ev.metaKey||ev.ctrlKey)?new Set(fsels):new Set(); fsels=new Set(keep); paintFsel();
+  const sx=ev.clientX, sy=ev.clientY;
+  const b=document.createElement('div'); b.id='band'; document.body.appendChild(b);
+  const cat=document.body.classList.contains('cat-l')?'l':'t';
+  const mv=e=>{
+    const x=Math.min(sx,e.clientX), y=Math.min(sy,e.clientY),
+          w=Math.abs(e.clientX-sx), h=Math.abs(e.clientY-sy);
+    b.style.cssText=`left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
+    out.querySelectorAll(`[data-o^="${cat},"]`).forEach(el=>{
+      const r=el.getBoundingClientRect();
+      const hit = r.right>=x && r.left<=x+w && r.bottom>=y && r.top<=y+h;
+      hit ? fsels.add(el.dataset.o) : keep.has(el.dataset.o)||fsels.delete(el.dataset.o);
+    });
+    paintFsel();
+  };
+  const up=()=>{ b.remove(); removeEventListener('pointermove',mv); removeEventListener('pointerup',up); };
+  addEventListener('pointermove',mv); addEventListener('pointerup',up);
+});
+
+function freeEdit(el){
+  if(el.isContentEditable) return;
+  const o=fobj(el.dataset.o), old=o.t;
+  el.contentEditable='true'; el.classList.add('editing'); el.style.transform=''; el.focus();
+  getSelection().selectAllChildren(el);
+  const done=ok=>{
+    el.contentEditable='false'; el.classList.remove('editing');
+    const t=el.textContent;
+    if(!ok || t===old){ el.textContent=old; return renderFree(); }
+    fpush(); o.t=t; o.w=0;                        // 改過字，原檔寬度不再適用
+    renderFree();
+  };
+  el.onblur=()=>done(true);
+  el.onkeydown=e=>{
+    e.stopPropagation();
+    if(e.key==='Enter'){ e.preventDefault();
+      // Shift+Enter 換行：.seg 是 white-space:pre，插一個換行字元就會斷行；Enter 維持存檔
+      e.shiftKey ? insertNL() : el.blur(); }
+    if(e.key==='Escape'){ el.textContent=old; el.blur(); }
+  };
+}
+
+const only = () => fsels.size===1 ? fobj([...fsels][0]) : null;
+lnLen.oninput = () => { const o=only(); if(!o||o.sz) return; const v=Math.max(0,+lnLen.value||0);
+  fpush(); if(o.w) o.w=v; else o.h=v; renderFree(); };
+lnTh.oninput = () => { const o=only(); if(!o||o.sz) return;
+  fpush(); o.t=Math.max(.25,+lnTh.value||.5); renderFree(); };
+delObj.onclick = () => {
+  if(!fsels.size) return;
+  fpush();
+  // 由後往前刪，索引才不會在中途位移
+  [...fsels].map(id=>id.split(',')).sort((a,b)=>b[2]-a[2])
+    .forEach(([k,p,i])=>(k==='l'?fpages[p].l:fpages[p].t).splice(i,1));
+  fsels.clear(); renderFree();
+};
+
+addEventListener('keydown', e=>{
+  const ae=document.activeElement;
+  if(!freeMode.checked || !fsels.size || ae?.isContentEditable || /INPUT|SELECT|TEXTAREA/.test(ae?.tagName)) return;
+  if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); return delObj.onclick(); }
+  const d=e.shiftKey?5:.5;
+  const v={ArrowLeft:[-d,0],ArrowRight:[d,0],ArrowUp:[0,-d],ArrowDown:[0,d]}[e.key];
+  if(!v) return;
+  e.preventDefault(); fpush();
+  fsels.forEach(id=>{ const o=fobj(id); o.x+=v[0]; o.y+=v[1]; place(fel(id), o); });
+  paintFsel();
+});
+
+// 語言最後套用：字典要蓋掉的靜態文字此時都在，dynLabels() 會順便重畫
+applyLang(); dynLabels();
+</script>
+

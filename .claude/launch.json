@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "toolbox", "runtimeExecutable": "go", "runtimeArgs": ["run", ".", "-dev"], "port": 17831 }
+  ]
+}

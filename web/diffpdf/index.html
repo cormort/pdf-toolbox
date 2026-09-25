@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DiffPDF Web</title>
+<style>
+  :root {
+    --paper:#EEF1F4; --sheet:#FFFFFF; --ink:#1B2430; --muted:#5A6573; --rule:#CDD4DC;
+    --mark:#F5D547; --red:#B42318; --blue:#1F4E8C; --tint:#E3EAF3;
+    --serif:'Noto Serif TC', serif; --sans:'Noto Sans TC', system-ui, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#141920; --sheet:#1D242D; --ink:#E4E9EF; --muted:#98A3B0; --rule:#334050;
+      --mark:#C9A92E; --red:#F2877D; --blue:#8DB6F5; --tint:#22303F; color-scheme: dark;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.6 var(--sans); }
+  .wrap { max-width:1200px; margin:0 auto; padding:0 16px; }
+  :focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+  header.top { padding-top:40px; padding-bottom:24px; }
+  h1 { font:700 2.25rem/1.2 var(--serif); margin:0; letter-spacing:.02em; }
+  h1 mark { background:linear-gradient(transparent 55%, var(--mark) 55%); color:inherit; padding:0 .1em; }
+  .lede { margin:8px 0 0; color:var(--muted); max-width:40em; }
+
+  .slots { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .slot { background:var(--sheet); border:1.5px dashed var(--rule); border-radius:10px; transition:border-color .15s, background .15s; }
+  .slot.filled { border-style:solid; border-color:var(--ink); }
+  .slot.over { border-color:var(--blue); background:var(--tint); }
+  .slot:has(input[type=file]:focus-visible) { outline:2px solid var(--blue); outline-offset:2px; }
+  .drop { display:block; padding:20px 20px 12px; cursor:pointer; }
+  .role { font:600 1.125rem/1.3 var(--serif); }
+  .name { display:block; margin-top:6px; font-weight:500; overflow-wrap:anywhere; }
+  .slot:not(.filled) .name { color:var(--muted); font-weight:400; }
+  .range { padding:0 20px 16px; color:var(--muted); font-size:.9rem; }
+  .rev { display:flex; align-items:center; gap:8px; margin:0 20px 16px; padding-top:12px; border-top:1px solid var(--rule); font-size:.9rem; cursor:pointer; }
+  .rev input { accent-color:var(--blue); width:18px; height:18px; margin:0; }
+  .slot:has(.rev input:checked) .role { color:var(--blue); }
+  .range input, .margins input { width:4.5em; font:inherit; color:var(--ink); background:var(--paper); border:1px solid var(--rule); border-radius:6px; padding:2px 6px; margin:0 4px; }
+
+  .adv { margin-top:16px; }
+  .adv summary { cursor:pointer; color:var(--muted); font-size:.9rem; width:fit-content; }
+  .adv summary:hover { color:var(--ink); }
+  .margins { display:flex; flex-wrap:wrap; gap:8px 20px; margin-top:10px; font-size:.9rem; color:var(--muted); }
+  .hint { margin:6px 0 0; font-size:.85rem; color:var(--muted); }
+
+  .controls { display:flex; flex-wrap:wrap; align-items:stretch; gap:16px; margin:20px 0 8px; }
+  fieldset.modes { display:flex; flex:1 1 520px; margin:0; padding:0; border:0; gap:0; }
+  .modes legend { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+  .modes label { flex:1; padding:10px 14px; background:var(--sheet); border:1px solid var(--rule); cursor:pointer; }
+  .modes label + label { border-left:0; }
+  .modes label:first-of-type { border-radius:8px 0 0 8px; }
+  .modes label:last-of-type { border-radius:0 8px 8px 0; }
+  .modes input { position:absolute; opacity:0; }
+  .modes b { display:block; font-weight:500; }
+  .modes small { color:var(--muted); font-size:.8rem; }
+  .modes label:has(input:checked) { background:var(--ink); border-color:var(--ink); color:var(--paper); }
+  .modes label:has(input:checked) small { color:inherit; opacity:.75; }
+  .modes label:has(input:focus-visible) { outline:2px solid var(--blue); outline-offset:2px; }
+  button { font:inherit; cursor:pointer; border-radius:8px; }
+  #go { padding:0 32px; min-height:52px; background:var(--red); color:#fff; border:0; font-weight:700; font-size:1.05rem; }
+  #go:disabled { opacity:.5; cursor:progress; }
+  .progress { display:flex; align-items:center; gap:12px; min-height:28px; color:var(--muted); font-size:.9rem; }
+  progress { width:180px; accent-color:var(--red); }
+  progress[hidden] { display:none; }
+
+  .summary { position:sticky; top:0; z-index:1; background:var(--paper); border-bottom:1px solid var(--rule); padding:12px 0; margin-top:16px; }
+  .summary .wrap { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+  .summary strong { font:600 1.1rem var(--serif); }
+  .jump { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
+  .jump a { white-space:nowrap; color:var(--ink); text-decoration:none; font-size:.85rem; padding:2px 10px; border:1px solid var(--rule); border-radius:999px; background:var(--sheet); font-variant-numeric:tabular-nums; }
+  .jump a:hover { border-color:var(--ink); }
+  #save, #csv { padding:8px 18px; background:var(--sheet); color:var(--ink); border:1.5px solid var(--ink); font-weight:500; }
+
+  .pair { padding:28px 0; border-bottom:1px solid var(--rule); scroll-margin-top:64px; }
+  .pair header { display:flex; align-items:baseline; gap:12px; margin-bottom:12px; }
+  .pair h2 { font:600 1.35rem var(--serif); margin:0; }
+  .count { color:var(--red); font-size:.9rem; font-weight:500; }
+  .sides { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  figure { margin:0; }
+  figcaption { font-size:.85rem; color:var(--muted); margin-bottom:6px; overflow-wrap:anywhere; }
+  canvas { display:block; width:100%; height:auto; background:#fff; border:1px solid var(--rule); box-shadow:0 1px 2px rgba(27,36,48,.08); }
+  .notes { margin:16px 0 0; padding-left:2.2em; max-width:72em; font-variant-numeric:tabular-nums; }
+  .notes li { padding:3px 0; }
+  .notes li::marker { color:var(--muted); }
+  .note { all:unset; cursor:zoom-in; border-radius:4px; padding:0 4px; margin:0 -4px; }
+  .note:hover { background:var(--tint); }
+  .note:focus-visible { outline:2px solid var(--blue); }
+  .sides canvas { cursor:zoom-in; }
+  del { color:var(--red); text-decoration-thickness:1.5px; }
+  ins { color:var(--blue); text-decoration:underline 2px; text-underline-offset:3px; }
+  del + ins { margin-left:.6em; }
+  .empty { padding:48px 0; text-align:center; color:var(--muted); }
+  .empty strong { display:block; font:600 1.5rem var(--serif); color:var(--ink); margin-bottom:4px; }
+  #viewer { width:100vw; height:100dvh; max-width:none; max-height:none; margin:0; padding:0; border:0; background:var(--paper); color:var(--ink); }
+  #viewer[open] { display:flex; flex-direction:column; }
+  #viewer::backdrop { background:rgba(20,25,32,.6); }
+  .vbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; padding:10px 16px; border-bottom:1px solid var(--rule); }
+  .vbar strong { font:600 1.1rem var(--serif); }
+  .vtools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .vtools button { min-width:36px; padding:4px 12px; background:var(--sheet); color:var(--ink); border:1px solid var(--rule); }
+  .vtools button[aria-pressed=true] { background:var(--ink); color:var(--paper); border-color:var(--ink); }
+  .vtools button:disabled { opacity:.4; cursor:not-allowed; }
+  #zlabel { min-width:3.5em; text-align:center; font-variant-numeric:tabular-nums; }
+  .vlegend { margin:0; padding:6px 16px; font-size:.85rem; border-bottom:1px solid var(--rule); }
+  .vlegend .r { color:#D92D20; font-weight:700; } .vlegend .c { color:#0E9CAD; font-weight:700; }
+  .vpanes { flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; gap:2px; background:var(--rule); }
+  .vpanes.one { grid-template-columns:1fr; }
+  .pane { overflow:auto; background:#C9D0D8; }
+  .pane .cap { position:sticky; top:0; left:0; z-index:1; padding:4px 10px; font-size:.8rem; background:var(--paper); color:var(--muted); border-bottom:1px solid var(--rule); }
+  .pane canvas { max-width:none; border:0; box-shadow:none; margin:12px; }
+  footer { padding:32px 0 48px; color:var(--muted); font-size:.85rem; }
+
+  @media (max-width:720px) {
+    .slots, .sides { grid-template-columns:1fr; }
+    fieldset.modes { flex-direction:column; flex-basis:100%; }
+    .modes label + label { border-left:1px solid var(--rule); border-top:0; }
+    .modes label:first-of-type { border-radius:8px 8px 0 0; }
+    .modes label:last-of-type { border-radius:0 0 8px 8px; }
+    #go { width:100%; }
+    .summary .wrap { justify-content:space-between; gap:8px; }
+    .summary { position:static; }
+    .summary strong { font-size:.95rem; flex:1 1 100%; }
+    #save, #csv { padding:4px 12px; font-size:.9rem; }
+    .jump { order:3; flex:1 1 100%; flex-wrap:nowrap; overflow-x:auto; padding-bottom:2px; }
+    h1 { font-size:1.8rem; }
+    .vpanes { grid-template-columns:1fr; grid-template-rows:1fr 1fr; }
+    .vpanes.one { grid-template-rows:1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } html { scroll-behavior:auto; } }
+  html { scroll-behavior:smooth; }
+</style>
+<script src="/vendor/jspdf-3.0.3/jspdf.umd.min.js"></script>
+</head>
+<body>
+<header class="top wrap">
+  <h1>DiffPDF <mark>Web</mark></h1>
+  <p class="lede">比對兩份 PDF 的文字與版面差異。檔案只在你的瀏覽器裡處理，不會上傳。可以一次把兩個 PDF 拖進頁面。</p>
+</header>
+
+<main class="wrap">
+  <div class="slots">
+    <div class="slot" id="slot1">
+      <label class="drop" for="f1"><span class="role">原版</span><span class="name">點這裡選擇檔案，或把 PDF 拖進來</span></label>
+      <input type="file" id="f1" class="sr-only" accept="application/pdf">
+      <div class="range">從第<input type="number" id="p1" value="1" min="1" aria-label="第 1 份檔案的起始頁">頁開始比對<span class="pages"></span></div>
+      <label class="rev"><input type="radio" name="rev" value="1">這份是修正後的檔案</label>
+    </div>
+    <div class="slot" id="slot2">
+      <label class="drop" for="f2"><span class="role">修正版</span><span class="name">點這裡選擇檔案，或把 PDF 拖進來</span></label>
+      <input type="file" id="f2" class="sr-only" accept="application/pdf">
+      <div class="range">從第<input type="number" id="p2" value="1" min="1" aria-label="第 2 份檔案的起始頁">頁開始比對<span class="pages"></span></div>
+      <label class="rev"><input type="radio" name="rev" value="2" checked>這份是修正後的檔案</label>
+    </div>
+  </div>
+
+  <details class="adv">
+    <summary>忽略頁面邊緣（頁首、頁尾、頁碼）</summary>
+    <div class="margins">
+      <label>上<input type="number" id="mt" value="0" min="0">mm</label>
+      <label>下<input type="number" id="mb" value="0" min="0">mm</label>
+      <label>左<input type="number" id="ml" value="0" min="0">mm</label>
+      <label>右<input type="number" id="mr" value="0" min="0">mm</label>
+    </div>
+    <p class="hint">這些範圍內的文字和圖案不列入比對，結果頁面上會以灰色標示。</p>
+  </details>
+
+  <div class="controls">
+    <fieldset class="modes">
+      <legend>比對方式</legend>
+      <label><input type="radio" name="mode" value="chars" checked><b>逐字</b><small>適合中文，數字整串比</small></label>
+      <label><input type="radio" name="mode" value="words"><b>逐詞</b><small>適合英文</small></label>
+      <label><input type="radio" name="mode" value="appearance"><b>版面</b><small>逐像素，抓字型與圖表</small></label>
+    </fieldset>
+    <button id="go">開始比對</button>
+  </div>
+  <div class="progress"><progress id="bar" hidden></progress><span id="status">比對時請保持這個分頁在前景。</span></div>
+</main>
+
+<div class="summary" id="summary" hidden>
+  <div class="wrap"><strong id="total"></strong><nav class="jump" id="jump" aria-label="跳到有差異的頁面"></nav><button id="csv" title="每處差異一列，可用 Excel 開啟">匯出 Excel</button><button id="save">匯出 PDF</button></div>
+</div>
+<div class="wrap" id="out"></div>
+<dialog id="viewer" aria-labelledby="vtitle">
+  <div class="vbar">
+    <strong id="vtitle"></strong>
+    <div class="vtools">
+      <button id="vside" aria-pressed="true">並排</button><button id="vover" aria-pressed="false">重疊</button>
+      <button id="zout" aria-label="縮小">−</button><span id="zlabel">100%</span><button id="zin" aria-label="放大">＋</button>
+      <button id="vclose">關閉</button>
+    </div>
+  </div>
+  <p class="vlegend" id="vlegend" hidden><span class="r">紅色</span>只在原版，<span class="c">藍綠色</span>只在修正版，黑色是兩版相同。</p>
+  <div class="vpanes" id="vpanes"></div>
+</dialog>
+
+<footer class="wrap">以 <a href="https://github.com/cormort/diffpdf-web" style="color:inherit">DiffPDF</a> 的三種比對模式為藍本，使用 pdf.js 在瀏覽器內運算。</footer>
+
+<script type="module">
+import * as pdfjs from '/vendor/pdfjs-4.10.38/pdf.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs-4.10.38/pdf.worker.min.mjs';
+
+const SCALE = 1.5;
+const $ = id => document.getElementById(id);
+const CJK = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}';
+const HYPHENS = /[­‐-―−]/g;
+
+async function load(input) {
+  return pdfjs.getDocument({ data: await input.files[0].arrayBuffer() }).promise;
+}
+
+async function render(doc, n) {
+  const canvas = document.createElement('canvas');
+  if (!doc || n > doc.numPages) { canvas.width = canvas.height = 1; return { canvas, tokens: [] }; }
+  const page = await doc.getPage(n);
+  const vp = page.getViewport({ scale: SCALE });
+  canvas.width = vp.width; canvas.height = vp.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  return { canvas, page, vp };
+}
+
+// Split each text item into word or character tokens with approximate boxes.
+// Margins to ignore, in canvas px, as [top, bottom, left, right].
+const MM = 72 / 25.4 * SCALE;
+const margins = () => ['mt', 'mb', 'ml', 'mr'].map(id => Math.max(0, +$(id).value || 0) * MM);
+
+function shade(canvas, [t, b, l, r]) {
+  if (!(t || b || l || r) || canvas.width < 2) return;
+  const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+  ctx.fillStyle = 'rgba(90,101,115,0.25)';
+  ctx.fillRect(0, 0, W, t); ctx.fillRect(0, H - b, W, b); ctx.fillRect(0, t, l, H - t - b); ctx.fillRect(W - r, t, r, H - t - b);
+}
+
+async function tokens(page, vp, mode, [mt, mb, ml, mr]) {
+  if (!page) return [];
+  const out = [];
+  // Characters mode: each CJK char is a token, but numbers/Latin runs stay whole so "455,420" isn't split into digits.
+  const re = mode === 'words' ? /\S+/g : new RegExp(`[${CJK}]|[^\\s${CJK}]+`, 'gu');
+  const items = (await page.getTextContent()).items.filter(it => it.str).map(it => {
+    const tx = pdfjs.Util.transform(vp.transform, it.transform);
+    return { str: it.str, x: tx[4], y: tx[5], h: Math.hypot(tx[2], tx[3]), w: it.width * SCALE };
+  });
+  // Reading order by position, not content-stream order, so identical-looking pages extract identically.
+  // ponytail: same-line = baselines within half a line height; fine for tables, not for rotated text.
+  items.sort((a, b) => Math.abs(a.y - b.y) > Math.min(a.h, b.h) / 2 ? a.y - b.y : a.x - b.x);
+  for (const it of items) {
+    // NFKC folds look-alike code points (Kangxi radical ⼤ → 大, full-width forms).
+    const str = it.str.normalize('NFKC').replace(HYPHENS, '-'), len = str.length;
+    for (const m of str.matchAll(re)) {
+      const t = { t: m[0], x: it.x + it.w * m.index / len, y: it.y - it.h, w: it.w * m[0].length / len, h: it.h };
+      const cx = t.x + t.w / 2, cy = t.y + t.h / 2;
+      if (cx >= ml && cx <= vp.width - mr && cy >= mt && cy <= vp.height - mb) out.push(t);
+    }
+  }
+  return out;
+}
+
+// Marks tokens not in the LCS. ponytail: O(n*m) DP after trimming common ends; switch to Myers if huge pages get slow.
+function diff(a, b) {
+  let s = 0, ea = a.length, eb = b.length;
+  while (s < ea && s < eb && a[s].t === b[s].t) s++;
+  while (ea > s && eb > s && a[ea - 1].t === b[eb - 1].t) { ea--; eb--; }
+  const n = ea - s, m = eb - s, W = m + 1, L = new Uint32Array((n + 1) * W);
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    L[i * W + j] = a[s + i].t === b[s + j].t ? L[(i + 1) * W + j + 1] + 1 : Math.max(L[(i + 1) * W + j], L[i * W + j + 1]);
+  // Consecutive changed tokens form one hunk {d: deleted, i: inserted} for the notes.
+  const da = [], db = [], hunks = [];
+  let h = null, i = 0, j = 0;
+  const flush = () => { if (h) hunks.push(h); h = null; };
+  const del = t => { (h ??= { d: [], i: [] }).d.push(t); da.push(t); };
+  const ins = t => { (h ??= { d: [], i: [] }).i.push(t); db.push(t); };
+  while (i < n && j < m) {
+    if (a[s + i].t === b[s + j].t) { flush(); i++; j++; }
+    else if (L[(i + 1) * W + j] >= L[i * W + j + 1]) del(a[s + i++]);
+    else ins(b[s + j++]);
+  }
+  while (i < n) del(a[s + i++]);
+  while (j < m) ins(b[s + j++]);
+  flush();
+  return [da, db, hunks];
+}
+
+function mark(canvas, boxes) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(245,213,71,0.5)';
+  ctx.strokeStyle = 'rgba(180,35,24,0.9)';
+  ctx.lineWidth = 2;
+  // Padded so a one-character change like "-" is still easy to spot.
+  for (const b of boxes) { ctx.fillRect(b.x - 3, b.y - 2, b.w + 6, b.h + 4); ctx.strokeRect(b.x - 3, b.y - 2, b.w + 6, b.h + 4); }
+}
+
+// Strict pixel comparison; tints every differing pixel red on both sides.
+function pixelDiff(c1, c2, [t, b, l, r]) {
+  const W = Math.max(c1.width, c2.width), H = Math.max(c1.height, c2.height);
+  const grab = c => c.getContext('2d').getImageData(0, 0, W, H);
+  const d1 = grab(c1), d2 = grab(c2), p1 = d1.data, p2 = d2.data;
+  let count = 0;
+  for (let y = Math.ceil(t); y < H - b; y++) for (let x = Math.ceil(l); x < W - r; x++) {
+    const k = (y * W + x) * 4;
+    if (p1[k] !== p2[k] || p1[k + 1] !== p2[k + 1] || p1[k + 2] !== p2[k + 2] || p1[k + 3] !== p2[k + 3]) {
+      count++;
+      p1[k] = p2[k] = 255; p1[k + 1] = p2[k + 1] = 0; p1[k + 2] = p2[k + 2] = 0; p1[k + 3] = p2[k + 3] = 255;
+    }
+  }
+  if (count) for (const [c, d] of [[c1, d1], [c2, d2]]) { c.width = W; c.height = H; c.getContext('2d').putImageData(d, 0, 0); }
+  return count;
+}
+
+let results = [], names = [];
+const noteText = n => n.msg ?? (n.d && n.i ? `「${n.d}」→「${n.i}」` : n.d ? `刪除「${n.d}」` : `新增「${n.i}」`);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+
+async function show(k) {
+  const input = $('f' + k), slot = $('slot' + k), f = input.files[0];
+  if (!f) return;
+  slot.classList.add('filled');
+  slot.querySelector('.name').textContent = f.name;
+  const pages = slot.querySelector('.pages');
+  let text;
+  try { const d = await load(input); text = `，共 ${d.numPages} 頁`; $('p' + k).max = d.numPages; }
+  catch { text = '，這個檔案無法以 PDF 開啟'; }
+  if (input.files[0] !== f) return; // a newer drop may have replaced the file meanwhile
+  pages.textContent = text;
+  autoAlign();
+}
+
+// Auto-align: find the page offset where the most page pairs share nearly the same words.
+async function pageSets(input) {
+  const d = await load(input), out = [];
+  for (let n = 1; n <= d.numPages; n++) {
+    const t = (await (await d.getPage(n)).getTextContent()).items.map(i => i.str).join(' ').normalize('NFKC');
+    out.push(new Set(t.split(/\s+/).filter(Boolean)));
+  }
+  return out;
+}
+const jaccard = (a, b) => { let k = 0; for (const x of a) if (b.has(x)) k++; return k ? k / (a.size + b.size - k) : 0; };
+const role = k => k === revised() ? '修正版' : '原版';
+
+async function autoAlign() {
+  const f1 = $('f1').files[0], f2 = $('f2').files[0];
+  if (!f1 || !f2) return;
+  $('status').textContent = '正在自動對齊頁碼…';
+  try {
+    const [A, B] = await Promise.all([pageSets($('f1')), pageSets($('f2'))]);
+    if ($('f1').files[0] !== f1 || $('f2').files[0] !== f2) return;
+    let best = { hits: 0, sum: 0, d: 0 };
+    for (let d = -(B.length - 1); d < A.length; d++) {
+      let hits = 0, sum = 0;
+      for (let i = Math.max(0, d); i < A.length && i - d < B.length; i++) { const j = jaccard(A[i], B[i - d]); sum += j; if (j > 0.8) hits++; }
+      if (hits > best.hits || (hits === best.hits && sum > best.sum)) best = { hits, sum, d };
+    }
+    if (!best.hits) { $('status').textContent = '找不到內容相近的頁面，請自行設定起始頁。'; return; }
+    $('p1').value = best.d >= 0 ? best.d + 1 : 1;
+    $('p2').value = best.d < 0 ? 1 - best.d : 1;
+    $('status').textContent = best.d
+      ? `已自動對齊：${role(1)}第 ${$('p1').value} 頁對應${role(2)}第 ${$('p2').value} 頁，可自行修改。`
+      : '兩份檔案的頁碼已對齊。';
+  } catch { $('status').textContent = ''; }
+}
+
+function setFile(k, file) {
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  $('f' + k).files = dt.files;
+  show(k);
+}
+
+// Drop anywhere: two files fill both slots in order; one file goes to the slot it was dropped on, else the first empty one.
+function dropFiles(files, target) {
+  const pdfs = [...files].filter(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+  if (!pdfs.length) { $('status').textContent = '只能放入 PDF 檔。'; return; }
+  if (pdfs.length > 1) { setFile(1, pdfs[0]); setFile(2, pdfs[1]); return; }
+  setFile(target ?? ($('f1').files[0] && !$('f2').files[0] ? 2 : 1), pdfs[0]);
+}
+
+// The user marks which slot holds the revised file; the other is the original.
+const revised = () => +document.querySelector('input[name=rev]:checked').value;
+const roles = () => { for (const k of [1, 2]) $('slot' + k).querySelector('.role').textContent = k === revised() ? '修正版' : '原版'; };
+document.querySelectorAll('input[name=rev]').forEach(r => r.onchange = roles);
+
+for (const k of [1, 2]) {
+  const slot = $('slot' + k);
+  $('f' + k).onchange = () => show(k);
+  slot.ondragover = e => { e.preventDefault(); slot.classList.add('over'); };
+  slot.ondragleave = () => slot.classList.remove('over');
+  slot.ondrop = e => { e.preventDefault(); e.stopPropagation(); slot.classList.remove('over'); dropFiles(e.dataTransfer.files, k); };
+}
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); dropFiles(e.dataTransfer.files); });
+const MAX_NOTES = 100; // ponytail: cap per page so a totally different page doesn't make a mile-long export
+
+function wrap(ctx, text, width) {
+  const lines = [];
+  let line = '';
+  for (const ch of text) {
+    if (ctx.measureText(line + ch).width > width) { lines.push(line); line = '  '; }
+    line += ch;
+  }
+  return [...lines, line];
+}
+
+// One export page: header, both pages side by side, numbered notes below.
+// ponytail: drawn on a canvas so Chinese needs no embedded font; text in the exported PDF isn't selectable.
+function composite({ label, c1, c2, notes }) {
+  const M = 24, F = 20, LH = 28;
+  const w = Math.max(c1.width, c2.width), h = Math.max(c1.height, c2.height), W = w * 2 + M * 3;
+  const c = document.createElement('canvas'), ctx = c.getContext('2d');
+  ctx.font = `${F}px sans-serif`;
+  const lines = notes.flatMap((t, k) => wrap(ctx, `${k + 1}. ${noteText(t)}`, W - M * 2));
+  c.width = W; c.height = M + LH * 2 + h + M + lines.length * LH + M;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#000'; ctx.textBaseline = 'top';
+  ctx.font = `bold ${F}px sans-serif`;
+  ctx.fillText(`${label}　${names[0]}  ↔  ${names[1]}`, M, M);
+  ctx.drawImage(c1, M, M + LH * 2); ctx.drawImage(c2, M * 2 + w, M + LH * 2);
+  ctx.font = `${F}px sans-serif`;
+  lines.forEach((l, k) => ctx.fillText(l, M, M + LH * 2 + h + M + k * LH));
+  return c;
+}
+
+const download = (blob, name) => {
+  const a = el('a', { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+$('csv').onclick = () => {
+  // Leading = + @ would make Excel run the cell as a formula; the PDF text is untrusted.
+  const q = v => { v = String(v ?? ''); if (/^[=+@\t\r]/.test(v)) v = "'" + v; return `"${v.replace(/"/g, '""')}"`; };
+  const kind = n => n.msg ? '說明' : n.d && n.i ? '修改' : n.d ? '刪除' : '新增';
+  const rows = [['原版頁碼', '修正版頁碼', '類型', '原版內容', '修正版內容'],
+    ...results.flatMap(r => r.notes.map(n => [r.a, r.b, kind(n), n.msg ?? n.d, n.msg ? '' : n.i]))];
+  download(new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' }), 'diffpdf-差異清單.csv');
+};
+
+// Viewer: both pages at a chosen zoom with synced scrolling, or one overlay of clean renders.
+const ZOOMS = [0.5, 0.75, 1, 1.5, 2, 3];
+let view = null, zoom = 1, overlay = false, syncing = false;
+
+function openViewer(r, note) {
+  view = { r, note }; zoom = 1; overlay = false;
+  $('vtitle').textContent = r.label;
+  $('vover').disabled = !r.p1 || !r.p2;
+  $('viewer').showModal();
+  drawViewer();
+}
+
+function pane(src, caption, focus) {
+  const c = el('canvas');
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+  if (focus) { ctx.strokeStyle = '#1F4E8C'; ctx.lineWidth = 4; ctx.strokeRect(focus.x - 8, focus.y - 6, focus.w + 16, focus.h + 12); }
+  return el('div', { className: 'pane' }, el('div', { className: 'cap', textContent: caption }), c);
+}
+
+async function cleanRender(page) {
+  const vp = page.getViewport({ scale: SCALE }), c = el('canvas');
+  c.width = vp.width; c.height = vp.height;
+  await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+  return c;
+}
+
+// Red channel from the revised page, green+blue from the original: original-only ink shows red, revised-only shows cyan.
+async function overlayCanvas(r) {
+  const [a, b] = await Promise.all([cleanRender(r.p1), cleanRender(r.p2)]);
+  const W = Math.max(a.width, b.width), H = Math.max(a.height, b.height);
+  const da = a.getContext('2d').getImageData(0, 0, W, H).data, db = b.getContext('2d').getImageData(0, 0, W, H).data;
+  const out = new ImageData(W, H), o = out.data;
+  const lum = (d, k) => d[k + 3] ? d[k] * 0.299 + d[k + 1] * 0.587 + d[k + 2] * 0.114 : 255;
+  for (let k = 0; k < o.length; k += 4) { const l1 = lum(da, k), l2 = lum(db, k); o[k] = l2; o[k + 1] = o[k + 2] = l1; o[k + 3] = 255; }
+  const c = el('canvas');
+  c.width = W; c.height = H;
+  c.getContext('2d').putImageData(out, 0, 0);
+  return c;
+}
+
+async function drawViewer() {
+  const { r, note } = view, panes = $('vpanes');
+  $('vside').setAttribute('aria-pressed', !overlay);
+  $('vover').setAttribute('aria-pressed', overlay);
+  $('vlegend').hidden = !overlay;
+  panes.className = 'vpanes' + (overlay ? ' one' : '');
+  panes.replaceChildren(...(overlay
+    ? [el('div', { className: 'pane' }, el('div', { className: 'cap', textContent: `重疊：原版 p.${r.a} ＋ 修正版 p.${r.b}` }), await overlayCanvas(r))]
+    : [pane(r.c1, `原版　${names[0]}　p.${r.a}`, note?.bd), pane(r.c2, `修正版　${names[1]}　p.${r.b}`, note?.bi)]));
+  const focus = note?.bd ?? note?.bi;
+  applyZoom(zoom, focus && { x: focus.x + focus.w / 2, y: focus.y + focus.h / 2 });
+}
+
+// Keeps the given canvas point (default: current centre) in the middle of each pane.
+function applyZoom(prev, at) {
+  $('zlabel').textContent = Math.round(zoom * 100) + '%';
+  $('zin').disabled = zoom === ZOOMS.at(-1); $('zout').disabled = zoom === ZOOMS[0];
+  syncing = true;
+  for (const p of $('vpanes').querySelectorAll('.pane')) {
+    const c = p.querySelector('canvas'), M = 12;
+    const cx = at ? at.x : (p.scrollLeft + p.clientWidth / 2 - M) / prev, cy = at ? at.y : (p.scrollTop + p.clientHeight / 2 - M) / prev;
+    c.style.width = c.width * zoom + 'px';
+    p.scrollLeft = cx * zoom + M - p.clientWidth / 2;
+    p.scrollTop = cy * zoom + M - p.clientHeight / 2;
+  }
+  requestAnimationFrame(() => syncing = false);
+}
+
+$('vpanes').addEventListener('scroll', e => {
+  if (syncing) return;
+  syncing = true;
+  for (const p of $('vpanes').querySelectorAll('.pane')) if (p !== e.target) { p.scrollTop = e.target.scrollTop; p.scrollLeft = e.target.scrollLeft; }
+  requestAnimationFrame(() => syncing = false);
+}, true);
+$('zin').onclick = () => { const prev = zoom; zoom = ZOOMS[ZOOMS.indexOf(zoom) + 1] ?? zoom; applyZoom(prev); };
+$('zout').onclick = () => { const prev = zoom; zoom = ZOOMS[ZOOMS.indexOf(zoom) - 1] ?? zoom; applyZoom(prev); };
+$('vside').onclick = () => { overlay = false; drawViewer(); };
+$('vover').onclick = () => { overlay = true; drawViewer(); };
+$('vclose').onclick = () => $('viewer').close();
+
+$('save').onclick = () => {
+  let pdf;
+  for (const r of results) {
+    const c = composite(r), size = [c.width, c.height], o = c.width > c.height ? 'l' : 'p';
+    if (!pdf) pdf = new window.jspdf.jsPDF({ orientation: o, unit: 'px', format: size, hotfixes: ['px_scaling'] });
+    else pdf.addPage(size, o);
+    pdf.addImage(c.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, c.width, c.height);
+  }
+  pdf.save('diffpdf-result.pdf');
+};
+
+$('go').onclick = async () => {
+  if (!$('f1').files[0] || !$('f2').files[0]) { $('status').textContent = '請先放入原版和修正版兩個 PDF。'; return; }
+  const mode = document.querySelector('input[name=mode]:checked').value, out = $('out'), bar = $('bar');
+  out.innerHTML = ''; $('jump').innerHTML = ''; $('summary').hidden = true;
+  const R = revised(), O = 3 - R; // original goes on the left, revised on the right
+  results = []; names = [$('f' + O).files[0].name, $('f' + R).files[0].name];
+  $('go').disabled = true; bar.hidden = false;
+  try {
+    const [d1, d2] = await Promise.all([load($('f' + O)), load($('f' + R))]);
+    // Start pages let a file with extra leading pages line up (a lite version of DiffPDF's page ranges).
+    const s1 = Math.max(1, +$('p' + O).value || 1), s2 = Math.max(1, +$('p' + R).value || 1);
+    const total = Math.max(d1.numPages - s1, d2.numPages - s2) + 1, m = margins();
+    let differ = 0;
+    for (let k = 0; k < total; k++) {
+      const a = s1 + k, b = s2 + k, label = a === b ? `第 ${a} 頁` : `第 ${a} ↔ ${b} 頁`;
+      $('status').textContent = `比對中 ${k + 1} / ${total}`;
+      bar.max = total; bar.value = k;
+      const [r1, r2] = await Promise.all([render(d1, a), render(d2, b)]);
+      let notes;
+      if (!r1.page || !r2.page) notes = [{ msg: `${r1.page ? '修正版' : '原版'}沒有這一頁` }];
+      else if (mode === 'appearance') {
+        const px = pixelDiff(r1.canvas, r2.canvas, m);
+        notes = px ? [{ msg: `${px.toLocaleString()} 個像素不同（${(px / (r1.canvas.width * r1.canvas.height) * 100).toFixed(2)}%）` }] : [];
+      } else {
+        const [a, b, hunks] = diff(await tokens(r1.page, r1.vp, mode, m), await tokens(r2.page, r2.vp, mode, m));
+        mark(r1.canvas, a); mark(r2.canvas, b);
+        const txt = ts => ts.map(t => t.t).join(' ').replace(new RegExp(`(?<=[${CJK}]) (?=[${CJK}])`, 'gu'), '');
+        const box = ts => {
+          if (!ts.length) return null;
+          const x = Math.min(...ts.map(t => t.x)), y = Math.min(...ts.map(t => t.y));
+          return { x, y, w: Math.max(...ts.map(t => t.x + t.w)) - x, h: Math.max(...ts.map(t => t.y + t.h)) - y };
+        };
+        notes = hunks.map(h => ({ d: txt(h.d), i: txt(h.i), bd: box(h.d), bi: box(h.i) }));
+        if (notes.length > MAX_NOTES) notes = [...notes.slice(0, MAX_NOTES), { msg: `另有 ${notes.length - MAX_NOTES} 處差異未列出` }];
+      }
+      if (!notes.length) continue;
+      differ++;
+      shade(r1.canvas, m); shade(r2.canvas, m);
+      const entry = { label, a, b, c1: r1.canvas, c2: r2.canvas, p1: r1.page, p2: r2.page, notes };
+      results.push(entry);
+      for (const c of [r1.canvas, r2.canvas]) Object.assign(c, {
+        tabIndex: 0, title: '放大檢視', onclick: () => openViewer(entry),
+        onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openViewer(entry); } },
+      });
+      const id = 'pg' + (k + 1), short = a === b ? `${a}` : `${a}↔${b}`;
+      const count = notes.some(n => n.msg) ? '' : `${notes.length} 處修改`;
+      out.append(el('section', { className: 'pair', id },
+        el('header', {}, el('h2', { textContent: label }), el('span', { className: 'count', textContent: count })),
+        el('div', { className: 'sides' },
+          el('figure', {}, el('figcaption', { textContent: `原版　${names[0]}　p.${a}` }), r1.canvas),
+          el('figure', {}, el('figcaption', { textContent: `修正版　${names[1]}　p.${b}` }), r2.canvas)),
+        el('ol', { className: 'notes' }, ...notes.map(n => {
+          const body = n.msg ? [n.msg] : [...(n.d ? [el('del', { textContent: n.d })] : []), ...(n.i ? [el('ins', { textContent: n.i })] : [])];
+          return el('li', {}, n.bd || n.bi
+            ? el('button', { className: 'note', title: '放大檢視這處修改', onclick: () => openViewer(entry, n) }, ...body)
+            : el('span', {}, ...body));
+        }))));
+      $('jump').append(el('a', { href: '#' + id, textContent: short }));
+    }
+    if (differ) {
+      $('total').textContent = `${total} 組頁面中有 ${differ} 組不同`;
+      $('summary').hidden = false;
+      $('status').textContent = '比對完成。';
+    } else {
+      out.append(el('div', { className: 'empty' }, el('strong', { textContent: '兩份檔案相同' }), `比對了 ${total} 組頁面，沒有找到差異。`));
+      $('status').textContent = '比對完成。';
+    }
+  } catch (e) {
+    $('status').textContent = '無法比對：' + e.message;
+  } finally {
+    $('go').disabled = false; bar.hidden = true;
+  }
+};
+</script>
+</body>
+</html>

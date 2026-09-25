@@ -1,5 +1,6 @@
 /dist/
-/webroot/
 /profile/
 *.exe
 .DS_Store
+/pdf-toolbox
+pdf-toolbox.log

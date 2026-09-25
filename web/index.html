@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Toolbox</title>
+<style>
+  :root { --bg:#f6f6f4; --bar:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#e3e3e0; --on:#1d1d1f; --on-ink:#fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161617; --bar:#1f1f21; --ink:#ececec; --mute:#98989d; --line:#333336; --on:#ececec; --on-ink:#161617; }
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; margin:0; }
+  body { display:flex; flex-direction:column; background:var(--bg); color:var(--ink);
+         font:14px/1.4 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
+  nav { display:flex; align-items:center; gap:4px; padding:6px 10px; background:var(--bar); border-bottom:1px solid var(--line); overflow-x:auto; }
+  nav b { margin-right:10px; white-space:nowrap; }
+  nav button { border:0; background:none; color:var(--mute); font:inherit; padding:6px 12px; border-radius:6px; cursor:pointer; white-space:nowrap; }
+  nav button:hover { color:var(--ink); background:var(--line); }
+  nav button[aria-selected=true] { background:var(--on); color:var(--on-ink); }
+  main { flex:1; position:relative; }
+  iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#fff; }
+  iframe[hidden] { display:none; }
+  #down { display:none; padding:8px 12px; background:#b3261e; color:#fff; }
+</style>
+</head>
+<body>
+<nav role="tablist">
+  <b>PDF Toolbox</b>
+  <button role="tab" data-src="/viewer/">閱讀與註解</button>
+  <button role="tab" data-src="/row-shifter/">資料列分頁調整</button>
+  <button role="tab" data-src="/xls2spread/">對開表排版</button>
+  <button role="tab" data-src="/diffpdf/">PDF 比對</button>
+  <button role="tab" data-src="/cmyk/">RGB → CMYK</button>
+</nav>
+<div id="down">背景服務已結束，請重新開啟 PdfToolbox.exe。</div>
+<main></main>
+<script>
+// 每個工具一個 iframe，第一次點才載入，之後切換只是顯示／隱藏，工作狀態不會掉
+const tabs = [...document.querySelectorAll('[role=tab]')];
+const frames = {};
+function show(btn) {
+  const src = btn.dataset.src;
+  if (!frames[src]) {
+    const f = document.createElement('iframe');
+    f.src = src;
+    f.allow = 'clipboard-read; clipboard-write; fullscreen';
+    document.querySelector('main').append(f);
+    frames[src] = f;
+  }
+  for (const b of tabs) b.setAttribute('aria-selected', b === btn);
+  for (const [k, f] of Object.entries(frames)) f.hidden = k !== src;
+  document.title = btn.textContent + ' · PDF Toolbox';
+  try { localStorage.setItem('toolbox:tab', src); } catch {}
+}
+tabs.forEach(b => b.onclick = () => show(b));
+let last = null;
+try { last = localStorage.getItem('toolbox:tab'); } catch {}
+show(tabs.find(b => b.dataset.src === last) || tabs[0]);
+
+// 心跳：服務端 5 分鐘沒收到請求就自行結束
+setInterval(() => fetch('/api/ping').then(r => { if (!r.ok) throw 0; })
+  .catch(() => document.getElementById('down').style.display = 'block'), 30000);
+</script>
+</body>
+</html>
