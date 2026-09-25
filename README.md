@@ -68,6 +68,8 @@ CMYK 預檢（原 Python 版的項目已全部移植）：
 
 其他（功能擴充，依建議順序）：
 - [x] 頁面整理、浮水印、頁碼：由 pdf_recompose 提供
+      已知：pdf_recompose 嵌入中文字型不子集化，每份輸出多一整個字型檔。pdf-lib 的 `subset: true` 會缺字，
+      經 gs 重寫則中文無法搜尋，暫維持現況；可評估改用 `@cantoo/pdf-lib`
 - [ ] 壓縮 PDF（gs）、加密／移除密碼（pdfcpu）、PDF 轉圖片（gs）
 - [ ] Word／Excel／PPT 轉 PDF（呼叫本機 Office）、網頁轉 PDF（Edge headless）
 - [ ] OCR（可攜 Tesseract + 繁中語言檔）、密文遮蔽（整頁點陣化）
