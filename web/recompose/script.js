@@ -2071,6 +2071,24 @@ window.onload = function() {
         return { title: buildTitleFromItems(items, pageNum), items: items };
     }
 
+    // 同一行的文字片段依間距接起來：一字一片段或拆字排版的英文，不會變成 "C h a p t e r"
+    function joinLineItems(line) {
+        let text = line[0].s;
+        for (let i = 1; i < line.length; i++) {
+            const prev = line[i - 1], cur = line[i];
+            const gap = cur.x - (prev.x + prev.w);
+            text += (gap > Math.max(prev.h, cur.h) * 0.2 ? ' ' : '') + cur.s;
+        }
+        return text;
+    }
+
+    // 中文字旁的空白都拿掉（「預 算 說 明」→「預算說明」），其餘連續空白收成一個，英文字詞間的空白才留得住
+    const CJK_CHAR = '[\\u2E80-\\u9FFF\\uF900-\\uFAFF\\uFE30-\\uFE4F\\uFF00-\\uFFEF]';
+    const SPACES_NEAR_CJK = new RegExp(`\\s+(?=${CJK_CHAR})|(?<=${CJK_CHAR})\\s+`, 'g');
+    function normalizeTitleSpaces(s) {
+        return s.replace(SPACES_NEAR_CJK, '').replace(/\s+/g, ' ').trim();
+    }
+
     function buildTitleFromItems(items, pageNum) {        if (items.length === 0) return `Page ${pageNum}`;
 
         // 依位置排序：y 小（靠頁頂）在前，同行依 x 排序
@@ -2089,13 +2107,13 @@ window.onload = function() {
 
         let title = `Page ${pageNum}`;
         if (lines.length > 0 && lines[0].length > 0) {
-            let titleLineText = lines[0].map(item => item.s).join(' ');
+            let titleLineText = joinLineItems(lines[0]);
             if (lines.length > 1 && lines[1].length > 0) {
                 const firstLineY = lines[0][0].y;
                 const firstLineHeight = lines[0][0].h;
                 const secondLineY = lines[1][0].y;
                 if (Math.abs(firstLineY - secondLineY) < firstLineHeight * 1.8) {
-                    titleLineText += ' ' + lines[1].map(item => item.s).join(' ');
+                    titleLineText += ' ' + joinLineItems(lines[1]);
                 }
             }
 
@@ -2122,7 +2140,7 @@ window.onload = function() {
             if (earliestIndex !== -1) {
                 cleanedTitle = cleanedTitle.substring(0, earliestIndex + keywordLength);
             }
-            cleanedTitle = cleanedTitle.replace(/\s+/g, '');
+            cleanedTitle = normalizeTitleSpaces(cleanedTitle);
             if (cleanedTitle.length > 70) {
                 cleanedTitle = cleanedTitle.substring(0, 70) + '...';
             }
@@ -2803,7 +2821,7 @@ window.onload = function() {
                 case 'even': shouldCheck = (pos % 2 === 1); break;  // 第 2,4,6... 張
                 case 'first': shouldCheck = (pos === 0); break;
                 case 'last': shouldCheck = (pos === pageItems.length - 1); break;
-                case 'blank': shouldCheck = !!item.firstLine && item.firstLine.startsWith('Page '); break;
+                case 'blank': shouldCheck = !!item.firstLine && /^Page \d+$/.test(item.firstLine); break;
             }
             item.isChecked = shouldCheck;
             if (shouldCheck) count++;
