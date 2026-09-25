@@ -43,9 +43,11 @@ check "下載路徑穿越 → 404" "$(curl -s -o /dev/null -w '%{http_code}' --p
 check "下載不存在的工作 → 404" "$(curl -s -o /dev/null -w '%{http_code}' $B/api/file/0123456789abcdef/x.pdf)" 404
 
 echo "── 靜態頁面"
-for p in / /viewer/ /recompose/ /row-shifter/ /xls2spread/ /diffpdf/ /compress/ /images/ /cmyk/ /protect/; do
+for p in / /viewer/ /recompose/ /row-shifter/ /xls2spread/ /diffpdf/ /compress/ /images/ /cmyk/ /protect/ /icons/favicon.ico; do
   check "GET $p" "$(curl -s -o /dev/null -w '%{http_code}' $B$p)" 200
 done
+check "favicon 是圖檔" "$(curl -s -o /dev/null -w '%{content_type}' $B/icons/favicon.ico)" "image"
+check "首頁有連 favicon" "$(curl -s $B/ | grep -c 'icons/favicon.ico')" 1
 check ".mjs 的 MIME" "$(curl -s -o /dev/null -w '%{content_type}' $B/vendor/pdfjs-4.10.38/pdf.min.mjs)" text/javascript
 check "閱讀器沒有註冊 service worker" "$(curl -s $B/viewer/script.js | grep -c 'serviceWorker.register')" 0
 

@@ -48,10 +48,24 @@ go run . -dev      # 開 http://127.0.0.1:17831（-dev：不開視窗、不自�
 go test ./...      # 內容串流改寫＋端到端（需要 gs 在 PATH）
 ./smoke.sh         # 對執行中的服務打一輪 API：守衛、各工具、錯誤訊息（需要 gs、python）
 ./build.sh         # 產出 dist/PdfToolbox/ 與 dist/PdfToolbox.zip（需要 go、7z、curl）
+                   # 打包不會帶執行時產生的 profile/；PdfToolbox 視窗還開著時會直接停下來要你先關掉
 ```
 
 Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToolbox\gs\bin` 加進 PATH。
 `sync.sh`／`build.sh` 用 Git Bash 跑（build 另需 7-Zip）。
+
+### 圖示
+
+- `web/icons/favicon.ico` 同時當瀏覽器 favicon 與 exe 圖示，內含 16／32／48／64／128／256 六種尺寸
+  （`index.html` 另外連了 16、32 的 PNG 與 apple-touch-icon）。
+- exe 的圖示是編進 `rsrc_windows_amd64.syso`（Go 會自動連結同目錄的 `.syso`；不同 GOOS／GOARCH 不會被帶進去）。
+  換圖示時重新產生一次並一起 commit：
+
+  ```bash
+  go run github.com/akavel/rsrc@v0.10.2 -ico web/icons/favicon.ico -o rsrc_windows_amd64.syso
+  ```
+
+  建置本身不需要這個工具（`build.sh` 只檢查 `.syso` 在不在，不會連網）。
 
 ## Windows 驗收清單（Mac 上測不到的部分）
 
@@ -98,7 +112,7 @@ pdf-lib 嵌入的 Identity-H 中文字型可把原檔的 ToUnicode 補回（`tou
 - [ ] Word／Excel／PPT 轉 PDF（呼叫本機 Office）、網頁轉 PDF（Edge headless）
 - [ ] OCR（可攜 Tesseract + 繁中語言檔）、密文遮蔽（整頁點陣化）
 - [ ] 工具間傳檔（例如比對結果送 CMYK），有需要再做
-- [ ] exe 圖示與版本資訊
+- [x] exe 圖示（`web/icons/` ＋ `rsrc_windows_amd64.syso`）；版本資訊還沒做
 
 ## 授權
 
