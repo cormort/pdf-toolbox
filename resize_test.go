@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"mime/multipart"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
 func TestResize(t *testing.T) {
@@ -85,4 +88,17 @@ func TestResize(t *testing.T) {
 	if fi, err := os.Stat(outOf(res)); err != nil || fi.Size() < 1000 {
 		t.Errorf("輸出檔太小，內容可能掉了：%v", err)
 	}
+}
+
+// outPageSize 讀出輸出檔某一頁的實際尺寸（pt），測試用
+func outPageSize(path string, page int) (float64, float64, error) {
+	ctx, err := api.ReadContextFile(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	_, _, inh, err := ctx.XRefTable.PageDict(page, false)
+	if err != nil || inh == nil || inh.MediaBox == nil {
+		return 0, 0, fmt.Errorf("第 %d 頁讀不到 MediaBox", page)
+	}
+	return inh.MediaBox.UR.X - inh.MediaBox.LL.X, inh.MediaBox.UR.Y - inh.MediaBox.LL.Y, nil
 }

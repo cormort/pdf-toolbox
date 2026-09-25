@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -53,7 +54,7 @@ func handleMetadata(w http.ResponseWriter, r *http.Request) {
 		res.Fields[k] = props[k]
 	}
 	for k := range props {
-		if !contains(metaStd, k) {
+		if !slices.Contains(metaStd, k) {
 			res.Extra = append(res.Extra, k)
 		}
 	}
@@ -180,13 +181,4 @@ func stripXMP(ctx *model.Context) int {
 		}
 	}
 	return n
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

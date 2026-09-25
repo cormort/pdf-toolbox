@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
-
-	"github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
 // 常見紙張的點數（1 pt = 1/72 inch），直式
@@ -75,25 +73,16 @@ func handleResize(w http.ResponseWriter, r *http.Request) {
 		"-dDEVICEHEIGHTPOINTS="+strconv.FormatFloat(ph, 'f', -1, 64),
 		"-dPDFFitPage",            // 內容等比縮放到放得下、置中
 		"-dAutoRotatePages=/None", // 不要讓 gs 自己把頁面轉向，尺寸才真的統一
-		"-sOutputFile="+slash(out), slash(in)); err != nil || !fileExists(out) {
-		res.Message = fmt.Sprintf("❌ Ghostscript 縮放失敗：%v", err)
+		"-sOutputFile="+slash(out), slash(in)); err != nil {
+		res.Message = "❌ Ghostscript 縮放失敗：" + err.Error()
+		return
+	}
+	if !fileExists(out) {
+		res.Message = "❌ Ghostscript 沒有產出檔案。"
 		return
 	}
 	res.Pages = ctx.PageCount
 	res.OK = true
 	res.Message = fmt.Sprintf("✅ 已把 %d 頁統一成 %s %s（內容等比縮放、置中；小頁面也會放大）。", res.Pages, res.Paper, orient)
 	res.Download = "/api/file/" + id + "/" + url.PathEscape(fmt.Sprintf("%s_%s.pdf", name, res.Paper))
-}
-
-// outPageSize 讀出輸出檔某一頁的實際尺寸（pt），測試與除錯用
-func outPageSize(path string, page int) (float64, float64, error) {
-	ctx, err := api.ReadContextFile(path)
-	if err != nil {
-		return 0, 0, err
-	}
-	if _, _, inh, err := ctx.XRefTable.PageDict(page, false); err != nil || inh == nil || inh.MediaBox == nil {
-		return 0, 0, fmt.Errorf("第 %d 頁讀不到 MediaBox", page)
-	} else {
-		return inh.MediaBox.UR.X - inh.MediaBox.LL.X, inh.MediaBox.UR.Y - inh.MediaBox.LL.Y, nil
-	}
 }
