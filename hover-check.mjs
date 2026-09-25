@@ -6,7 +6,7 @@
 // 被 hover 規則塗掉），看程式碼或算權重都不保險——這支會送真的滑鼠與鍵盤事件，
 // 再讀 computed style，用實際的顏色值判斷。
 //
-//   node hover-check.mjs            # 需要 Node 18+ 與 Edge，不用先啟動服務
+//   node hover-check.mjs            # 需要 Node 22+（用全域 WebSocket）與 Edge，不用先啟動服務
 //   EDGE=<msedge.exe 路徑> node hover-check.mjs
 //
 // 它自己起一個只服務 web/ 的靜態伺服器（隨機 port）與 headless Edge，跑完會收乾淨。
@@ -28,6 +28,12 @@ const MIME = {
   '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json',
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 這支用全域 WebSocket（Node 22 起才預設有）；版本不對時講清楚，不要丟 "WebSocket is not defined"
+if (typeof WebSocket === 'undefined') {
+  console.error(`這支需要 Node 22+（用到全域 WebSocket）；目前是 ${process.version}`);
+  process.exit(2);
+}
 
 function edgePath() {
   const cands = [

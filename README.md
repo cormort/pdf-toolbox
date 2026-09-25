@@ -53,7 +53,7 @@ go test ./...      # 內容串流改寫＋端到端（需要 gs 在 PATH）
 ./smoke.sh         # 對執行中的服務打一輪 API：守衛、各工具、錯誤訊息（需要 gs、python）
 ./build.sh         # 產出 dist/PdfToolbox/ 與 dist/PdfToolbox.zip（需要 go、7z、curl）
                    # 打包不會帶執行時產生的 profile/；PdfToolbox 視窗還開著時會直接停下來要你先關掉
-node hover-check.mjs  # 用 Edge 實際量 hover／focus 的樣式（需要 Node 18+ 與 Edge；改 CSS 時跑）
+node hover-check.mjs  # 用 Edge 實際量 hover／focus 的樣式（需要 Node 22+ 與 Edge；改 CSS 時跑）
 ```
 
 Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToolbox\gs\bin` 加進 PATH。

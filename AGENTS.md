@@ -16,7 +16,7 @@
 
 - Windows 11，用 Git Bash 跑 `.sh`
 - 需要 Go（版本以 `go.mod` 為準）、Ghostscript 10.08.0（`gswin64c`）、7-Zip、python
-- 有動到 `web/` 底下的樣式時，另外需要 Node 18+ 與 Edge（跑 `node hover-check.mjs`）
+- 有動到 `web/` 底下的樣式時，另外需要 Node 22+ 與 Edge（跑 `node hover-check.mjs`）
 - 工具裝不起來時，放在 `%TEMP%` 底下的暫存資料夾，**不要放進 repo**，也不要改系統 PATH
 - Go 的快取也指到暫存資料夾：`GOPATH`、`GOCACHE`、`GOTOOLCHAIN=local`
 - 在 repo 裡建的暫存測試檔（例如 `zz_tmp_*_test.go`）結束前一定要刪掉
