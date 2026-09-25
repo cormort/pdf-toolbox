@@ -66,6 +66,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServerFS(web))
 	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "pdf-toolbox") })
+	mux.HandleFunc("GET /recompose/fonts/NotoSansTC-Regular.ttf", serveCJKFont)
 	mux.HandleFunc("POST /api/cmyk", handleCMYK)
 	mux.HandleFunc("GET /api/file/{id}/{name}", handleFile)
 
@@ -125,4 +126,20 @@ func openWindow(url string) {
 		}
 	}
 	exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+}
+
+// serveCJKFont 讓 pdf_recompose 用電腦內建的中文字型，不必在包裡帶 7 MB 的思源黑體。
+// 標楷體是單一 .ttf（正黑體、細明體是 .ttc 集合，pdf-lib 不能直接嵌入）；Arial Unicode 只給 Mac 開發用。
+// 都找不到時回 404，pdf_recompose 會退回只用英數字型。
+func serveCJKFont(w http.ResponseWriter, r *http.Request) {
+	for _, p := range []string{
+		filepath.Join(os.Getenv("WINDIR"), "Fonts", "kaiu.ttf"),
+		"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+	} {
+		if fileExists(p) {
+			http.ServeFile(w, r, p)
+			return
+		}
+	}
+	http.NotFound(w, r)
 }

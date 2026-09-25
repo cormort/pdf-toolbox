@@ -50,6 +50,7 @@ Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToo
 - [ ] 關掉視窗後，工作管理員裡的 PdfToolbox.exe 5 分鐘內消失
 - [ ] 執行中再雙擊 exe，只會多開一個視窗
 - [ ] 下載的檔案進「下載」資料夾，檔名正確
+- [ ] 頁面重組的目次、頁碼、浮水印中文用標楷體（`C:\Windows\Fonts\kaiu.ttf`）正常顯示；英文版 Windows 需先裝「繁體中文補充字型」
 
 ## 待辦
 

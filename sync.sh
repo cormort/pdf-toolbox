@@ -17,7 +17,8 @@ fetch pdf-row-shifter row-shifter index.html
 fetch xls2spread      xls2spread  index.html
 fetch diffpdf-web     diffpdf     index.html
 fetch pdf_recompose   recompose   index.html instruction.html script.js style.css pdf.min.js pdf.worker.min.js \
-                                  pdf-lib.min.js fontkit.umd.min.js sortable.min.js fonts
+                                  pdf-lib.min.js fontkit.umd.min.js sortable.min.js
+# 不帶 fonts/（思源黑體）：main.go 改送 Windows 內建的標楷體
 # 不帶 service-worker.js：本機服務用不到離線快取，留著反而會讓改版後跑舊檔
 fetch pdfviewer_v2    viewer      index.html instructions.html style.css script.js db.js \
                                   manifest.json lib icons LICENSE THIRD-PARTY-NOTICES.md
