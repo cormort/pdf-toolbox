@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,8 +26,10 @@ import (
 //go:embed icc/*.icc
 var iccFS embed.FS
 
+// 印刷廠沒指定規格時，採台灣一般平版四色印刷（銅版紙）常見的送印要求
 const (
 	cmykProfileName = "Japan Color 2011 Coated"
+	bleedMM         = 3   // 出血
 	tacLimit        = 300 // 總墨量上限（C+M+Y+K，%）
 	convertTimeout  = 5 * time.Minute
 	inspectTimeout  = 90 * time.Second
@@ -158,14 +161,20 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 	add("✅ CMYK 轉換完成\n📦 檔案大小：%.2f MB\n🔧 Ghostscript：%s\n📐 ICC Profile：%s\n🖼️ 彩色／灰階圖片上限 300 ppi，單色 1200 ppi\n🔤 字型：要求嵌入及子集化",
 		float64(st.Size())/1024/1024, gsVersion, cmykProfileName)
 
-	if after, err := scanPDF(out, ""); err != nil {
+	after, err := scanPDF(out, "")
+	if err != nil {
 		add("⚠️ 無法分析輸出檔：%v", err)
+		add("%s", printerReport(inspectInk(out, dir, nil)))
 	} else {
 		add("【轉換後】\n%s\n%s", formatSpaces(after.Spaces), evaluateSpaces(after.Spaces))
-		add("%s", formatFonts(after.Fonts))
+		hasTrim := make([]bool, len(after.Pages))
+		for i, p := range after.Pages {
+			hasTrim[i] = p.hasTrim
+		}
+		add("%s", printerReport(inspectBoxes(after.Pages), inspectInk(out, dir, hasTrim)))
 		add("%s", formatImages(after.Images))
+		add("%s", formatFonts(after.Fonts))
 	}
-	add("%s", inspectInk(out, dir))
 	add("⚠️ 本工具產生的是指定 ICC Profile 的 CMYK PDF，不等同於已通過 PDF/X 認證。\n⚠️ 若原始圖片解析度不足，轉成 300 ppi 不會憑空增加細節。")
 
 	name := strings.TrimSuffix(hdr.Filename, filepath.Ext(hdr.Filename)) + "_cmyk.pdf"
@@ -322,8 +331,87 @@ func formatPages(pages []int) string {
 	return strings.Join(ranges, ", ")
 }
 
-// inspectInk 以 72 dpi 點陣化 CMYK 輸出，檢查總墨量與四色黑。
-func inspectInk(pdf, dir string) string {
+const ptPerMM = 72 / 25.4
+
+// 常見成品尺寸（mm，直式）
+var knownSizes = []struct {
+	w, h float64
+	name string
+}{{210, 297, "A4"}, {297, 420, "A3"}, {148, 210, "A5"}, {182, 257, "B5"}, {257, 364, "B4"}, {190, 260, "16 開"}}
+
+func describePageSize(w, h float64) string {
+	short, long := math.Round(math.Min(w, h)), math.Round(math.Max(w, h))
+	for _, k := range knownSizes {
+		if math.Abs(short-k.w) <= 1 && math.Abs(long-k.h) <= 1 {
+			if w > h {
+				return k.name + "橫式"
+			}
+			return k.name
+		}
+	}
+	return fmt.Sprintf("%.0f × %.0f mm", w, h)
+}
+
+// inspectBoxes 檢查成品尺寸是否一致、出血是否足夠。
+func inspectBoxes(pages []pageBoxes) string {
+	var order []string
+	sizes := map[string][]int{}
+	var short []int
+	least, anyTrim := math.Inf(1), false
+	for i, p := range pages {
+		w, h := (p.trim[2]-p.trim[0])/ptPerMM, (p.trim[3]-p.trim[1])/ptPerMM
+		if p.rotate%180 != 0 { // 以顯示方向判斷直式／橫式
+			w, h = h, w
+		}
+		size := describePageSize(w, h)
+		if _, ok := sizes[size]; !ok {
+			order = append(order, size)
+		}
+		sizes[size] = append(sizes[size], i+1)
+		bleed := min(p.trim[0]-p.outer[0], p.trim[1]-p.outer[1], p.outer[2]-p.trim[2], p.outer[3]-p.trim[3]) / ptPerMM
+		if bleed < bleedMM-0.1 {
+			short = append(short, i+1)
+			least = min(least, max(bleed, 0))
+		}
+		anyTrim = anyTrim || p.hasTrim
+	}
+
+	var lines []string
+	if len(order) == 1 {
+		lines = append(lines, fmt.Sprintf("✅ 成品尺寸一致：%s，共 %d 頁。", order[0], len(pages)))
+	} else {
+		lines = append(lines, "⚠️ 成品尺寸不一致，請確認是否刻意混用：")
+		for _, size := range order {
+			lines = append(lines, fmt.Sprintf("• %s：第 %s 頁", size, formatPages(sizes[size])))
+		}
+	}
+	switch {
+	case len(short) == 0:
+		lines = append(lines, fmt.Sprintf("✅ 出血：每頁皆有至少 %d mm。", bleedMM))
+	case !anyTrim:
+		lines = append(lines, fmt.Sprintf("ℹ️ 出血：檔案未設定裁切框（TrimBox），視為無出血。若版面沒有滿版底色或貼邊圖片可以不用出血；有的話請加 %d mm 出血（見下方貼邊檢查）。", bleedMM))
+	default:
+		lines = append(lines, fmt.Sprintf("❌ 出血不足 %d mm：第 %s 頁（最少 %.1f mm）。", bleedMM, formatPages(short), least))
+	}
+	if len(pages)%4 != 0 {
+		lines = append(lines, fmt.Sprintf("ℹ️ 總頁數 %d 不是 4 的倍數；若採騎馬釘裝訂需補空白頁（膠裝不受影響）。", len(pages)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// printerReport 把印刷廠預檢各段組起來，開頭統計需修正／需確認的項目數。
+func printerReport(sections ...string) string {
+	body := strings.Join(sections, "\n")
+	verdict := "✅ 未發現印刷問題"
+	if e, w := strings.Count(body, "❌"), strings.Count(body, "⚠️"); e+w > 0 {
+		verdict = fmt.Sprintf("共 %d 項需修正、%d 項需確認", e, w)
+	}
+	return fmt.Sprintf("🏭 印刷廠預檢（台灣一般平版四色印刷預設：出血 %d mm、總墨量 %d%%）\n%s\n%s", bleedMM, tacLimit, verdict, body)
+}
+
+// inspectInk 以 72 dpi 點陣化 CMYK 輸出，檢查總墨量、四色黑，
+// 以及沒有裁切框的頁面是否有圖文貼齊頁緣（hasTrim 為 nil 時不檢查貼邊）。
+func inspectInk(pdf, dir string, hasTrim []bool) string {
 	rd := filepath.Join(dir, "ink")
 	os.MkdirAll(rd, 0o755)
 	defer os.RemoveAll(rd)
@@ -333,17 +421,28 @@ func inspectInk(pdf, dir string) string {
 	}
 	files, _ := filepath.Glob(filepath.Join(rd, "p*.pam"))
 	sort.Strings(files)
-	var tacPages, richPages []int
+	var tacPages, richPages, edgePages []int
 	worst, worstPage := 0, 0
 	limit := tacLimit*255/100 + 2
+	const band = 3 // 72 dpi 下約 1 mm
 	for n, f := range files {
-		b, _ := os.ReadFile(f)
-		if i := bytes.Index(b, []byte("ENDHDR\n")); i >= 0 {
-			b = b[i+7:]
+		raw, _ := os.ReadFile(f)
+		hdr, b, _ := bytes.Cut(raw, []byte("ENDHDR\n"))
+		var w, h int
+		for _, l := range strings.Split(string(hdr), "\n") {
+			fmt.Sscanf(l, "WIDTH %d", &w)
+			fmt.Sscanf(l, "HEIGHT %d", &h)
 		}
-		over, rich := false, false
+		checkEdge := n < len(hasTrim) && !hasTrim[n] && w > 2*band && h > 2*band
+		over, rich, edge := false, false, false
 		for j := 0; j+3 < len(b); j += 4 {
 			c, m, y, k := int(b[j]), int(b[j+1]), int(b[j+2]), int(b[j+3])
+			if checkEdge && !edge {
+				x, row := (j/4)%w, (j/4)/w
+				if (x < band || x >= w-band || row < band || row >= h-band) && max(c, m, y, k) > 13 { // 任一色版超過約 5%
+					edge = true
+				}
+			}
 			if t := c + m + y + k; t > limit {
 				over = true
 				if t > worst {
@@ -361,6 +460,9 @@ func inspectInk(pdf, dir string) string {
 		if rich {
 			richPages = append(richPages, n+1)
 		}
+		if edge {
+			edgePages = append(edgePages, n+1)
+		}
 	}
 	var lines []string
 	if len(tacPages) > 0 {
@@ -373,6 +475,9 @@ func inspectInk(pdf, dir string) string {
 		lines = append(lines, fmt.Sprintf("⚠️ 四色黑：第 %s 頁有由 C、M、Y、K 混成的黑色。若是文字或細線，套色稍有偏差就會出現彩色毛邊，建議黑字用單色黑 K100；大面積深色底圖可以忽略。", formatPages(richPages)))
 	} else {
 		lines = append(lines, "✅ 四色黑：未發現 C、M、Y、K 混成的黑色。")
+	}
+	if len(edgePages) > 0 {
+		lines = append(lines, fmt.Sprintf("⚠️ 貼邊物件：第 %s 頁有圖文延伸到頁面邊緣，但沒有出血；裁切時邊緣可能露白，請加 %d mm 出血或內縮。", formatPages(edgePages), bleedMM))
 	}
 	return strings.Join(lines, "\n")
 }

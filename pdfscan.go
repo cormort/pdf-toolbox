@@ -24,8 +24,9 @@ type scan struct {
 	Fonts   map[string]bool // 字型名稱 → 是否嵌入
 	Changed int             // 改成灰階的次數
 	Images  []imageUse      // 每一次畫圖（同一張圖畫兩次算兩筆，同 pdfimages）
-	seen    map[int]bool    // 已處理的串流物件號（多頁共用同一串流時只改一次）
-	ocOff   map[int]bool    // 預設關閉的圖層（OCG 物件號）
+	Pages   []pageBoxes
+	seen    map[int]bool // 已處理的串流物件號（多頁共用同一串流時只改一次）
+	ocOff   map[int]bool // 預設關閉的圖層（OCG 物件號）
 }
 
 func newScan() *scan {
@@ -86,6 +87,7 @@ func scanPDF(in, out string) (s *scan, err error) {
 		}
 		s.resources(res, 0)
 		s.images(page.Bytes(), res, identity, i, 0)
+		s.Pages = append(s.Pages, s.pageBoxes(d, inh))
 	}
 	if s.rewrite && s.Changed > 0 {
 		return s, api.WriteContextFile(ctx, out)
@@ -653,4 +655,62 @@ func (s *scan) ocHidden(o types.Object) bool {
 	}
 	r, ok := o.(types.IndirectRef)
 	return ok && s.ocOff[r.ObjectNumber.Value()]
+}
+
+// ---- 頁面框 ----
+
+type box [4]float64 // llx lly urx ury（pt）
+
+type pageBoxes struct {
+	trim, outer box
+	hasTrim     bool // 頁面自己定義了 TrimBox 或 ArtBox
+	rotate      int
+}
+
+func norm(b box) box {
+	return box{math.Min(b[0], b[2]), math.Min(b[1], b[3]), math.Max(b[0], b[2]), math.Max(b[1], b[3])}
+}
+
+func (s *scan) boxOf(o types.Object) (box, bool) {
+	a, ok := s.deref(o).(types.Array)
+	if !ok || len(a) != 4 {
+		return box{}, false
+	}
+	var b box
+	for i := range b {
+		b[i] = s.num(a[i])
+	}
+	return norm(b), true
+}
+
+// pageBoxes 同原 Python 版（pikepdf）：裁切框 TrimBox → CropBox → MediaBox；外框 BleedBox → MediaBox
+func (s *scan) pageBoxes(d types.Dict, inh *model.InheritedPageAttrs) pageBoxes {
+	media := box{0, 0, 612, 792} // 缺 MediaBox 時同一般閱讀器，當 Letter
+	var p pageBoxes
+	if inh != nil {
+		if r := inh.MediaBox; r != nil {
+			media = norm(box{r.LL.X, r.LL.Y, r.UR.X, r.UR.Y})
+		}
+		p.rotate = inh.Rotate
+	}
+	p.trim, p.outer = media, media
+	if inh != nil && inh.CropBox != nil {
+		r := inh.CropBox
+		p.trim = norm(box{r.LL.X, r.LL.Y, r.UR.X, r.UR.Y})
+	}
+	if b, ok := s.boxOf(d["TrimBox"]); ok {
+		p.trim = b
+	}
+	if b, ok := s.boxOf(d["BleedBox"]); ok {
+		p.outer = b
+	}
+	// 規範：超出 MediaBox 的框以交集為準
+	clip := func(b box) box {
+		return box{max(b[0], media[0]), max(b[1], media[1]), min(b[2], media[2]), min(b[3], media[3])}
+	}
+	p.trim, p.outer = clip(p.trim), clip(p.outer)
+	_, t := d["TrimBox"]
+	_, a := d["ArtBox"]
+	p.hasTrim = t || a
+	return p
 }

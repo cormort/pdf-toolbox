@@ -86,7 +86,7 @@ func TestCMYKEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return inspectInk(out, workDir), s
+		return inspectInk(out, workDir, nil), s
 	}
 
 	ink, after := convert(in)
@@ -98,4 +98,52 @@ func TestCMYKEndToEnd(t *testing.T) {
 		t.Errorf("前處理後不應有四色黑：%s %v", ink, after.Spaces)
 	}
 	t.Log(formatFonts(after.Fonts))
+}
+
+func TestInspectBoxes(t *testing.T) {
+	mm := func(v float64) float64 { return v * 72 / 25.4 }
+	a4 := box{0, 0, mm(210), mm(297)}
+	bleed := box{-mm(3), -mm(3), mm(213), mm(300)}
+	for _, c := range []struct {
+		name  string
+		pages []pageBoxes
+		want  []string
+	}{
+		{"A4 有出血", []pageBoxes{{a4, bleed, true, 0}, {a4, bleed, true, 0}, {a4, bleed, true, 0}, {a4, bleed, true, 0}},
+			[]string{"✅ 成品尺寸一致：A4，共 4 頁", "✅ 出血"}},
+		{"沒有裁切框", []pageBoxes{{a4, a4, false, 0}}, []string{"ℹ️ 出血：檔案未設定裁切框", "不是 4 的倍數"}},
+		{"跨頁裁半、沒出血", []pageBoxes{{box{mm(210), 0, mm(420), mm(297)}, box{mm(210), 0, mm(420), mm(297)}, true, 0}},
+			[]string{"❌ 出血不足 3 mm：第 1 頁（最少 0.0 mm）"}},
+		{"旋轉 90 度是橫式", []pageBoxes{{a4, bleed, true, 90}}, []string{"A4橫式"}},
+		{"混用尺寸", []pageBoxes{{a4, bleed, true, 0}, {box{0, 0, mm(297), mm(420)}, box{0, 0, mm(297), mm(420)}, false, 0}},
+			[]string{"⚠️ 成品尺寸不一致", "• A4：第 1 頁", "• A3：第 2 頁"}},
+	} {
+		got := inspectBoxes(c.pages)
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s：缺少 %q\n%s", c.name, w, got)
+			}
+		}
+	}
+}
+
+// 貼邊：滿版色塊在沒有裁切框的頁面要警告，有裁切框（交給出血檢查）就不管
+func TestEdgeCheck(t *testing.T) {
+	workDir = t.TempDir()
+	initCMYK()
+	if gsPath == "" {
+		t.Skip("沒有 Ghostscript")
+	}
+	ps := filepath.Join(workDir, "edge.ps")
+	os.WriteFile(ps, []byte("%!PS\n0 0 0.5 0 setcmykcolor 0 0 612 100 rectfill showpage\n"), 0o644)
+	pdf := filepath.Join(workDir, "edge.pdf")
+	if _, err := runGS(time.Minute, "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite", "-sOutputFile="+pdf, ps); err != nil {
+		t.Fatal(err)
+	}
+	if got := inspectInk(pdf, workDir, []bool{false}); !strings.Contains(got, "⚠️ 貼邊物件：第 1 頁") {
+		t.Errorf("沒有裁切框應警告貼邊：%s", got)
+	}
+	if got := inspectInk(pdf, workDir, []bool{true}); strings.Contains(got, "貼邊") {
+		t.Errorf("有裁切框不應檢查貼邊：%s", got)
+	}
 }
