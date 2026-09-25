@@ -189,3 +189,17 @@ false setoverprint 0.5 .setfillconstantalpha 1 0 0 0 setcmykcolor 72 600 200 100
 		}
 	}
 }
+
+func TestTextLines(t *testing.T) {
+	s := newScan()
+	// 第 1 頁：10 pt 字縮成一半（5 pt）、0.1 pt 線、表格細框（矩形 0.2 × 0.5 放大 1 倍仍 < 0.25）
+	s.textLines([]byte("q .5 0 0 .5 0 0 cm BT /F1 10 Tf (a) Tj ET Q 0.1 w 0 0 m 10 0 l S 0 0 100 0.2 re f"), nil, 1, 1, 0)
+	// 第 2 頁：線寬 0；隱形 OCR 層的小字不算
+	s.textLines([]byte("0 w 0 0 m 1 1 l S BT 3 Tr /F1 2 Tf (x) Tj ET"), nil, 1, 2, 0)
+	got := inspectTextLines(s)
+	for _, want := range []string{"⚠️ 小字：第 1 頁有小於 6 pt 的文字（最小 5.0 pt）", "❌ 極細線：第 2 頁", "⚠️ 細線：第 1 頁"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("缺少 %q\n%s", want, got)
+		}
+	}
+}

@@ -30,12 +30,15 @@ type scan struct {
 	Transparency, Overprint []int
 	Spots                   map[string][]int
 	SpotOrder               []string
+	SmallText               map[int]float64 // 頁碼 → 該頁最小字級（pt）
+	ThinLines, Hairlines    map[int]bool
 	seen                    map[int]bool // 已處理的串流物件號（多頁共用同一串流時只改一次）
 	ocOff                   map[int]bool // 預設關閉的圖層（OCG 物件號）
 }
 
 func newScan() *scan {
-	return &scan{Spaces: map[string]bool{}, Fonts: map[string]bool{}, seen: map[int]bool{}, ocOff: map[int]bool{}, Spots: map[string][]int{}}
+	return &scan{Spaces: map[string]bool{}, Fonts: map[string]bool{}, seen: map[int]bool{}, ocOff: map[int]bool{}, Spots: map[string][]int{},
+		SmallText: map[int]float64{}, ThinLines: map[int]bool{}, Hairlines: map[int]bool{}}
 }
 
 // scanPDF 盤點 in；out 非空時同時做單色黑改寫，有改到才寫出 out。
@@ -92,6 +95,7 @@ func scanPDF(in, out string) (s *scan, err error) {
 		}
 		s.resources(res, 0)
 		s.images(page.Bytes(), res, identity, i, 0)
+		s.textLines(page.Bytes(), res, 1, i, 0)
 		s.Pages = append(s.Pages, s.pageBoxes(d, inh))
 		s.pageFlags(i, res)
 	}
@@ -818,4 +822,110 @@ func (s *scan) pageFlags(page int, res types.Dict) {
 		}
 		s.Spots[name] = append(s.Spots[name], page)
 	}
+}
+
+// ---- 小字與細線 ----
+
+const (
+	minTextPt = 6    // 最小字級
+	minLinePt = 0.25 // 最細線寬（約 0.09 mm）
+)
+
+// textLines 同原 Python 版：縮放倍率以矩陣行列式計（面積比），長度要開根號。
+// ponytail: 不分 x／y 方向，非等比縮放（例如把字壓扁）時只是近似
+func (s *scan) textLines(data []byte, res types.Dict, scale float64, page, depth int) {
+	if depth > 8 {
+		return
+	}
+	type state struct {
+		ctm, tm, size, lw float64
+		tr                int
+	}
+	st := state{ctm: scale, tm: 1, lw: 1}
+	var stack []state
+	var rects [][2]float64
+	det := func(ops []tok) (float64, bool) {
+		if len(ops) != 6 {
+			return 0, false
+		}
+		return math.Abs(ops[0].num*ops[3].num - ops[1].num*ops[2].num), true
+	}
+	lex(data, func(op string, ops []tok, _, _ int) {
+		switch op {
+		case "q":
+			stack = append(stack, st)
+		case "Q":
+			if n := len(stack); n > 0 {
+				st, stack = stack[n-1], stack[:n-1]
+			}
+		case "cm":
+			if d, ok := det(ops); ok {
+				st.ctm *= d
+			}
+		case "BT":
+			st.tm = 1
+		case "Tm":
+			if d, ok := det(ops); ok {
+				st.tm = d
+			}
+		case "Tf":
+			if len(ops) == 2 {
+				st.size = math.Abs(ops[1].num)
+			}
+		case "Tr":
+			if len(ops) == 1 {
+				st.tr = int(ops[0].num)
+			}
+		case "Tj", "TJ", "'", "\"":
+			if st.tr == 3 { // 隱形文字（掃描檔的 OCR 層）
+				return
+			}
+			if size := st.size * math.Sqrt(st.tm*st.ctm); size > 0 && size < minTextPt-0.05 {
+				if old, ok := s.SmallText[page]; !ok || size < old {
+					s.SmallText[page] = size
+				}
+			}
+		case "w":
+			if len(ops) == 1 {
+				st.lw = ops[0].num
+			}
+		case "re":
+			if len(ops) == 4 {
+				rects = append(rects, [2]float64{math.Abs(ops[2].num), math.Abs(ops[3].num)})
+			}
+		case "S", "s", "B", "B*", "b", "b*":
+			if st.lw == 0 {
+				s.Hairlines[page] = true
+			} else if st.lw*math.Sqrt(st.ctm) < minLinePt-0.01 {
+				s.ThinLines[page] = true
+			}
+			rects = nil
+		case "f", "F", "f*":
+			for _, r := range rects { // Word／Excel 的表格框線常用細長矩形填色畫
+				if w := min(r[0], r[1]) * math.Sqrt(st.ctm); w > 0 && w < minLinePt-0.01 {
+					s.ThinLines[page] = true
+				}
+			}
+			rects = nil
+		case "n":
+			rects = nil
+		case "Do":
+			if len(ops) == 0 {
+				return
+			}
+			sd, ok := s.deref(s.dict(res["XObject"])[ops[len(ops)-1].name]).(types.StreamDict)
+			if sub, _ := sd.Dict["Subtype"].(types.Name); !ok || sub != "Form" {
+				return
+			}
+			m := 1.0
+			if a, ok := s.deref(sd.Dict["Matrix"]).(types.Array); ok && len(a) == 6 {
+				m = math.Abs(s.num(a[0])*s.num(a[3]) - s.num(a[1])*s.num(a[2]))
+			}
+			fres := s.dict(sd.Dict["Resources"])
+			if fres == nil {
+				fres = res
+			}
+			s.textLines(s.decoded(sd), fres, st.ctm*m, page, depth+1)
+		}
+	})
 }

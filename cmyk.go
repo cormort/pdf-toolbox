@@ -171,7 +171,7 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 		for i, p := range after.Pages {
 			hasTrim[i] = p.hasTrim
 		}
-		add("%s", printerReport(inspectBoxes(after.Pages), inspectInk(out, dir, hasTrim), inspectFlags(after)))
+		add("%s", printerReport(inspectBoxes(after.Pages), inspectInk(out, dir, hasTrim), inspectFlags(after), inspectTextLines(after)))
 		add("%s", formatImages(after.Images))
 		add("%s", formatFonts(after.Fonts))
 	}
@@ -435,6 +435,41 @@ func inspectFlags(s *scan) string {
 	return strings.Join(lines, "\n")
 }
 
+// inspectTextLines 報告小於最小字級的文字與過細的線條。
+func inspectTextLines(s *scan) string {
+	pages := func(m map[int]bool) []int {
+		var a []int
+		for p := range m {
+			a = append(a, p)
+		}
+		sort.Ints(a)
+		return a
+	}
+	var lines []string
+	if len(s.SmallText) > 0 {
+		var ps []int
+		least := math.Inf(1)
+		for p, v := range s.SmallText {
+			ps = append(ps, p)
+			least = min(least, v)
+		}
+		sort.Ints(ps)
+		lines = append(lines, fmt.Sprintf("⚠️ 小字：第 %s 頁有小於 %d pt 的文字（最小 %.1f pt），印出來可能難以閱讀或糊掉。", formatPages(ps), minTextPt, least))
+	} else {
+		lines = append(lines, fmt.Sprintf("✅ 字級：沒有小於 %d pt 的文字。", minTextPt))
+	}
+	if len(s.Hairlines) > 0 {
+		lines = append(lines, fmt.Sprintf("❌ 極細線：第 %s 頁有線寬設為 0 的線條，印刷時可能細到看不見，請改為至少 %g pt。", formatPages(pages(s.Hairlines)), minLinePt))
+	}
+	if len(s.ThinLines) > 0 {
+		lines = append(lines, fmt.Sprintf("⚠️ 細線：第 %s 頁有細於 %g pt（約 0.09 mm）的線條，可能印不清楚。", formatPages(pages(s.ThinLines)), minLinePt))
+	}
+	if len(s.Hairlines) == 0 && len(s.ThinLines) == 0 {
+		lines = append(lines, fmt.Sprintf("✅ 線寬：沒有細於 %g pt 的線條。", minLinePt))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // printerReport 把印刷廠預檢各段組起來，開頭統計需修正／需確認的項目數。
 func printerReport(sections ...string) string {
 	body := strings.Join(sections, "\n")
@@ -442,7 +477,8 @@ func printerReport(sections ...string) string {
 	if e, w := strings.Count(body, "❌"), strings.Count(body, "⚠️"); e+w > 0 {
 		verdict = fmt.Sprintf("共 %d 項需修正、%d 項需確認", e, w)
 	}
-	return fmt.Sprintf("🏭 印刷廠預檢（台灣一般平版四色印刷預設：出血 %d mm、總墨量 %d%%）\n%s\n%s", bleedMM, tacLimit, verdict, body)
+	return fmt.Sprintf("🏭 印刷廠預檢（台灣一般平版四色印刷預設：出血 %d mm、總墨量 %d%%、最小字 %d pt、最細線 %g pt）\n%s\n%s",
+		bleedMM, tacLimit, minTextPt, minLinePt, verdict, body)
 }
 
 // inspectInk 以 72 dpi 點陣化 CMYK 輸出，檢查總墨量、四色黑，
