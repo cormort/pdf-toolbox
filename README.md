@@ -18,10 +18,12 @@
 
 ```
 PdfToolbox\
-  PdfToolbox.exe   Go：內嵌 web/ 與 ICC，服務 http://127.0.0.1:17831，用 Edge --app 開視窗
-  gs\bin\          Ghostscript 10.08.0（gswin64c + gsdll64 + VC++ 執行階段）
-  profile\         Edge 設定（首次執行產生）
-  pdf-toolbox.log  執行紀錄
+  PdfToolbox.exe          Go：內嵌 web/ 與 ICC，服務 http://127.0.0.1:17831，用 Edge --app 開視窗
+  gs\bin\                 Ghostscript 10.08.0（gswin64c + gsdll64 + VC++ 執行階段）
+  profile\                Edge 設定（首次執行產生）
+  pdf-toolbox.log         本次執行的紀錄
+  pdf-toolbox.prev.log    上一次執行的紀錄（每次啟動時把上一份改名過來，當掉重開還追得到）
+  pdf-toolbox-errors-*.txt 使用者按「匯出錯誤紀錄」下載的檔案
 ```
 
 - **為什麼要本機 HTTP**：ES module、Service Worker、pdf.js worker 在 `file://` 都會被擋。
@@ -29,6 +31,10 @@ PdfToolbox\
 - **生命週期**：首頁每 30 秒 ping，5 分鐘沒請求就自動結束；已在執行時再雙擊只會開視窗。
 - **暫存**：上傳檔與轉檔結果放在 `%TEMP%\pdf-toolbox-*`，程式結束時整個刪掉；同一場工作階段裡超過 60 分鐘
   沒下載的結果也會先清掉（下載連結到那時候失效）。預檢的點陣資料直接從 gs 的標準輸出串流進來，不落地。
+- **錯誤匯出**：GUI 沒有主控台，出錯時使用者手上沒有東西可以回報。所以首頁右上角有「匯出錯誤紀錄」，
+  下載一份純文字檔，內含環境（版本、Windows、Ghostscript、暫存目錄）、最近 200 筆錯誤與兩份 log 的尾端。
+  收集的來源是後端（HTTP 4xx／5xx、`ok=false`、panic）與前端（首頁統一攔 shell 與各 iframe 的 JS 例外、
+  未處理的 promise），前端只回報同一個錯誤第一次，免得壞掉的頁面把紀錄洗掉。按鈕上的數字就是目前的筆數。
 - **安全**：只聽 127.0.0.1，拒絕 Host 不符（DNS rebinding）與跨站 POST。
 - **CMYK 不帶 Python**：單色黑前處理（R=G=B 的 RGB 改 DeviceGray → 轉出來只有 K）用 Go + pdfcpu 重寫，
   轉換本身是一行 Ghostscript，預檢的總墨量／四色黑改用 Go 讀 gs 的點陣輸出，

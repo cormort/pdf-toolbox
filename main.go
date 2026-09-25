@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 )
@@ -41,7 +42,7 @@ func main() {
 	url := "http://" + addr + "/"
 
 	// GUI 程式沒有主控台，訊息寫到 exe 旁邊的 log
-	if f, err := os.Create(filepath.Join(exeDir, "pdf-toolbox.log")); err == nil {
+	if f, err := openLog(exeDir); err == nil {
 		// 檔案要放第一個：windowsgui 沒有 stderr，寫入會失敗，MultiWriter 遇錯就不再寫後面的
 		log.SetOutput(io.MultiWriter(f, os.Stderr))
 	}
@@ -58,6 +59,9 @@ func main() {
 		log.Fatal(err)
 	}
 	initCMYK()
+	if gsPath == "" {
+		recordError("啟動", "Ghostscript", noGS, 0)
+	}
 
 	// Windows 的登錄檔可能把 .js 對應成 text/plain，ES module 會因此載入失敗
 	mime.AddExtensionType(".js", "text/javascript; charset=utf-8")
@@ -66,12 +70,17 @@ func main() {
 	web, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServerFS(web))
-	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "pdf-toolbox") })
+	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) {
+		errCountHeader(w) // 首頁的按鈕才知道有幾筆錯誤
+		fmt.Fprint(w, "pdf-toolbox")
+	})
 	mux.HandleFunc("GET /recompose/fonts/NotoSansTC-Regular.ttf", serveCJKFont)
 	mux.HandleFunc("POST /api/cmyk", handleCMYK)
 	mux.HandleFunc("POST /api/compress", handleCompress)
 	mux.HandleFunc("POST /api/protect", handleProtect)
 	mux.HandleFunc("POST /api/images", handleImages)
+	mux.HandleFunc("POST /api/client-error", handleClientError)
+	mux.HandleFunc("GET /api/errors/export", handleErrorsExport)
 	mux.HandleFunc("GET /api/file/{id}/{name}", handleFile)
 
 	lastHit.Store(time.Now().Unix())
@@ -89,12 +98,28 @@ func guard(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 只接受自己的網址：擋 DNS rebinding，也擋其他網站對本服務的跨站 POST
 		if r.Host != addr || (r.Method != http.MethodGet && r.Header.Get("Origin") != "http://"+addr) {
+			recordError("後端", r.Method+" "+r.URL.Path, "請求被拒：Host 或 Origin 不符", http.StatusForbidden)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		busy.Add(1)
-		defer func() { lastHit.Store(time.Now().Unix()); busy.Add(-1) }()
+		// panic 也要留紀錄，否則使用者只看到連線被切斷，匯出檔裡什麼都沒有
+		defer func() {
+			lastHit.Store(time.Now().Unix())
+			busy.Add(-1)
+			if v := recover(); v != nil {
+				recordError("panic", r.Method+" "+r.URL.Path, fmt.Sprint(v)+"\n"+string(debug.Stack()), http.StatusInternalServerError)
+				log.Printf("panic：%v\n%s", v, debug.Stack())
+				panic(v) // 交還給 net/http 處理，行為跟以前一樣
+			}
+		}()
 		w.Header().Set("Cache-Control", "no-cache") // 換新版 exe 後不會吃到舊檔
+		if apiJSON(r) {
+			c := &captureWriter{ResponseWriter: w}
+			h.ServeHTTP(c, r)
+			c.finish(r) // API 失敗時狀態碼仍是 200，要看內容才知道
+			return
+		}
 		h.ServeHTTP(w, r)
 	})
 }

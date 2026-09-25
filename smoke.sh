@@ -81,6 +81,19 @@ check "多頁 ZIP" "$(post images -F "file=@$T/five.pdf" -F 'pages=1-2,4-' -F fo
 check "超出範圍" "$(post images -F "file=@$T/five.pdf" -F pages=9)" "不在 1 到 5 頁之間"
 check "前後相反" "$(post images -F "file=@$T/five.pdf" -F pages=5-2)" "前後相反"
 
+echo "── 錯誤匯出"
+# 訊息用 ASCII：Windows 的 curl 會用系統字碼頁送中文（見上面 post 的說明），不代表瀏覽器行為
+check "前端錯誤回報" "$(post client-error -H 'Content-Type: application/json' \
+  -d '{"where":"smoke.sh","message":"client error from smoke test"}' | field ok)" True
+check "ping 帶錯誤筆數" "$(curl -s -D - -o /dev/null $B/api/ping | tr -d '\r' | grep -ci '^x-error-count')" 1
+curl -s -o "$T/err.txt" -D "$T/err.hdr" "$B/api/errors/export"
+check "匯出 Content-Type" "$(tr -d '\r' < "$T/err.hdr" | grep -i '^content-type')" "text/plain"
+check "匯出檔名帶時間" "$(tr -d '\r' < "$T/err.hdr" | grep -i '^content-disposition')" "pdf-toolbox-errors-"
+rep=$(cat "$T/err.txt")
+for w in "── 環境 ──" "Ghostscript：" "── 錯誤紀錄 ──" "client error from smoke test" "POST /api/images" "── 本次執行紀錄" "── 上次執行紀錄"; do
+  check "匯出含：$w" "$rep" "$w"
+done
+
 echo
 [ $fail = 0 ] && echo "全部通過。" || echo "有項目未通過。"
 exit $fail

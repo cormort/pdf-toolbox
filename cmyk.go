@@ -212,6 +212,8 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	// 每個工作目錄只有一個結果檔 out.*（pdf、zip、png、jpg）
 	files, _ := filepath.Glob(filepath.Join(workDir, id, "out.*"))
 	if len(files) != 1 {
+		// 下載連結失效（放太久被清掉）也要留紀錄，不然使用者只看到 404
+		recordError("後端", "GET /api/file", "找不到結果檔："+r.PathValue("name"), http.StatusNotFound)
 		http.NotFound(w, r)
 		return
 	}

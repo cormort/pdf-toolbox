@@ -18,6 +18,9 @@
   nav button { border:0; background:none; color:var(--mute); font:inherit; padding:6px 12px; border-radius:6px; cursor:pointer; white-space:nowrap; }
   nav button:hover { color:var(--ink); background:var(--line); }
   nav button[aria-selected=true] { background:var(--on); color:var(--on-ink); }
+  nav a { margin-left:auto; color:var(--mute); text-decoration:none; padding:6px 12px; border:1px solid var(--line); border-radius:6px; white-space:nowrap; }
+  nav a:hover { color:var(--ink); }
+  nav a.has { color:var(--on-ink); background:#b3261e; border-color:#b3261e; }
   main { flex:1; position:relative; }
   iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#fff; }
   iframe[hidden] { display:none; }
@@ -36,6 +39,7 @@
   <button role="tab" data-src="/images/">PDF 轉圖片</button>
   <button role="tab" data-src="/cmyk/">RGB → CMYK</button>
   <button role="tab" data-src="/protect/">密碼保護</button>
+  <a id="errs" href="/api/errors/export" title="下載環境資訊、最近 200 筆錯誤與執行紀錄，方便回報問題">匯出錯誤紀錄</a>
 </nav>
 <div id="down">背景服務已結束，請重新開啟 PdfToolbox.exe。</div>
 <main></main>
@@ -49,6 +53,7 @@ function show(btn) {
     const f = document.createElement('iframe');
     f.src = src;
     f.allow = 'clipboard-read; clipboard-write; fullscreen';
+    f.onload = () => hook(f.contentWindow, src); // 各工具的 JS 例外也一起收（含 sync.sh 帶進來的）
     document.querySelector('main').append(f);
     frames[src] = f;
   }
@@ -62,9 +67,45 @@ let last = null;
 try { last = localStorage.getItem('toolbox:tab'); } catch {}
 show(tabs.find(b => b.dataset.src === last) || tabs[0]);
 
-// 心跳：服務端 5 分鐘沒收到請求就自行結束
-setInterval(() => fetch('/api/ping').then(r => { if (!r.ok) throw 0; })
-  .catch(() => document.getElementById('down').style.display = 'block'), 30000);
+// 前端錯誤回報給背景服務，匯出錯誤紀錄時才看得到瀏覽器這一側發生什麼事。
+// 同一個錯誤只送一次，免得壞掉的頁面陷入迴圈把紀錄洗掉。
+const sent = new Set();
+function reportError(where, message, stack) {
+  const key = where + '|' + message;
+  if (!message || sent.has(key)) return;
+  sent.add(key);
+  fetch('/api/client-error', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ where, message, stack: stack || '', url: location.href }),
+  }).catch(() => {});
+}
+function hook(win, where) {
+  if (!win || win.__hooked) return;
+  win.__hooked = true;
+  win.addEventListener('error', e => reportError(where, e.message,
+    (e.error && e.error.stack) || `${e.filename || ''}:${e.lineno || 0}`));
+  win.addEventListener('unhandledrejection', e => {
+    const r = e.reason;
+    reportError(where, String((r && r.message) || r), r && r.stack);
+  });
+}
+hook(window, '首頁');
+
+// 心跳：服務端 5 分鐘沒收到請求就自行結束；順便用回應標頭更新錯誤筆數
+const errBtn = document.getElementById('errs');
+async function beat() {
+  try {
+    const r = await fetch('/api/ping');
+    if (!r.ok) throw 0;
+    const n = Number(r.headers.get('X-Error-Count') || 0);
+    errBtn.textContent = n ? `匯出錯誤紀錄（${n}）` : '匯出錯誤紀錄';
+    errBtn.classList.toggle('has', n > 0);
+  } catch {
+    document.getElementById('down').style.display = 'block';
+  }
+}
+beat();
+setInterval(beat, 30000);
 </script>
 </body>
 </html>
