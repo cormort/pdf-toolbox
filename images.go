@@ -39,6 +39,9 @@ func parsePages(spec string, n int) ([]int, error) {
 					return nil, fmt.Errorf("看不懂頁碼「%s」", part)
 				}
 			}
+			if b < a {
+				return nil, fmt.Errorf("頁碼範圍「%s」前後相反", part)
+			}
 		}
 		for p := max(a, 1); p <= min(b, n); p++ {
 			seen[p] = true

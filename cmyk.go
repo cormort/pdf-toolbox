@@ -3,6 +3,7 @@ package main
 // RGB → CMYK：單色黑前處理（pdfscan.go）→ Ghostscript 以 Japan Color 2011 Coated 轉換 → 印刷預檢。
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -19,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -67,6 +69,15 @@ func findGS() string {
 }
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// fileSize 讀不到檔案時回 0；呼叫端都已經確認過檔案存在，這裡只是不要讓 os.Stat 的錯誤變成 panic
+func fileSize(p string) int64 {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
 
 // Ghostscript 參數一律用正斜線：Windows 接受，也避開 gs 對反斜線的跳脫處理
 func slash(p string) string { return filepath.ToSlash(p) }
@@ -143,21 +154,20 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	restoreToUnicode(src, out) // gs 會丟掉部分中文字型的文字對應，補回來才搜尋得到
-	st, _ := os.Stat(out)
 	add("✅ CMYK 轉換完成\n📦 檔案大小：%.2f MB\n🔧 Ghostscript：%s\n📐 ICC Profile：%s\n🖼️ 彩色／灰階圖片上限 300 ppi，單色 1200 ppi\n🔤 字型：要求嵌入及子集化",
-		float64(st.Size())/1024/1024, gsVersion, cmykProfileName)
+		float64(fileSize(out))/1024/1024, gsVersion, cmykProfileName)
 
 	after, err := scanPDF(out, "")
 	if err != nil {
 		add("⚠️ 無法分析輸出檔：%v", err)
-		add("%s", printerReport(inspectInk(out, dir, nil)))
+		add("%s", printerReport(inspectInk(out, nil)))
 	} else {
 		add("【轉換後】\n%s\n%s", formatSpaces(after.Spaces), evaluateSpaces(after.Spaces))
 		hasTrim := make([]bool, len(after.Pages))
 		for i, p := range after.Pages {
 			hasTrim[i] = p.hasTrim
 		}
-		add("%s", printerReport(inspectBoxes(after.Pages), inspectInk(out, dir, hasTrim), inspectFlags(after), inspectTextLines(after)))
+		add("%s", printerReport(inspectBoxes(after.Pages), inspectInk(out, hasTrim), inspectFlags(after), inspectTextLines(after)))
 		add("%s", formatImages(after.Images))
 		add("%s", formatFonts(after.Fonts))
 	}
@@ -184,6 +194,7 @@ func receivePDF(w http.ResponseWriter, r *http.Request) (id, dir, in, name, msg 
 	}
 	id = randomID()
 	dir = filepath.Join(workDir, id)
+	sweepJobs(60 * time.Minute) // 順手清掉舊的工作目錄，上傳的檔案不會一直留在磁碟上
 	os.MkdirAll(dir, 0o755)
 	in = filepath.Join(dir, "in.pdf")
 	if err := saveTo(in, file); err != nil {
@@ -194,7 +205,7 @@ func receivePDF(w http.ResponseWriter, r *http.Request) (id, dir, in, name, msg 
 
 func handleFile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, err := hex.DecodeString(id); err != nil || len(id) != 16 {
+	if !isJobID(id) {
 		http.NotFound(w, r)
 		return
 	}
@@ -212,6 +223,16 @@ func randomID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// isJobID 判斷目錄名是不是 randomID() 產生的工作編號。
+// 工作目錄和 icc/ 同在 workDir 底下，清舊目錄時要靠它把 icc/ 排除掉。
+func isJobID(name string) bool {
+	if len(name) != 16 {
+		return false
+	}
+	_, err := hex.DecodeString(name)
+	return err == nil
 }
 
 func saveTo(path string, r io.Reader) error {
@@ -499,27 +520,53 @@ func printerReport(sections ...string) string {
 
 // inspectInk 以 72 dpi 點陣化 CMYK 輸出，檢查總墨量、四色黑，
 // 以及沒有裁切框的頁面是否有圖文貼齊頁緣（hasTrim 為 nil 時不檢查貼邊）。
-func inspectInk(pdf, dir string, hasTrim []bool) string {
-	rd := filepath.Join(dir, "ink")
-	os.MkdirAll(rd, 0o755)
-	defer os.RemoveAll(rd)
-	if _, err := runGS(inspectTimeout, "-dSAFER", "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pamcmyk32", "-r72",
-		"-sOutputFile="+slash(filepath.Join(rd, "p%05d.pam")), slash(pdf)); err != nil {
+// PAM 直接讀 gs 的標準輸出：200 頁的檔案原本要寫進又讀回約 380 MB 的暫存檔，串流可以整段省掉。
+func inspectInk(pdf string, hasTrim []bool) string {
+	ctx, cancel := context.WithTimeout(context.Background(), inspectTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, gsPath, "-dSAFER", "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pamcmyk32", "-r72",
+		"-sstdout=%stderr", // gs 的訊息改走 stderr，stdout 只留 PAM，免得混進點陣資料
+		"-sOutputFile=%stdout", slash(pdf))
+	hideWindow(cmd)
+	var errOut bytes.Buffer
+	cmd.Stderr = &errOut
+	stdout, err := cmd.StdoutPipe()
+	if err == nil {
+		err = cmd.Start()
+	}
+	if err != nil {
 		return fmt.Sprintf("⚠️ 總墨量檢查失敗：%v", err)
 	}
-	files, _ := filepath.Glob(filepath.Join(rd, "p*.pam"))
-	sort.Strings(files)
+	// 讀到一半放棄時 gs 還卡在寫 stdout，不砍掉程序 Wait 會等不到
+	fail := func(err error) string {
+		cmd.Process.Kill()
+		cmd.Wait()
+		if ctx.Err() != nil {
+			return fmt.Sprintf("⚠️ 總墨量檢查失敗：超過 %s 未完成", inspectTimeout)
+		}
+		return fmt.Sprintf("⚠️ 總墨量檢查失敗：%v\n%s", err, bytes.TrimSpace(errOut.Bytes()))
+	}
+
+	const band = 3 // 72 dpi 下約 1 mm
+	limit := tacLimit*255/100 + 2
 	var tacPages, richPages, edgePages []int
 	worst, worstPage := 0, 0
-	limit := tacLimit*255/100 + 2
-	const band = 3 // 72 dpi 下約 1 mm
-	for n, f := range files {
-		raw, _ := os.ReadFile(f)
-		hdr, b, _ := bytes.Cut(raw, []byte("ENDHDR\n"))
-		var w, h int
-		for _, l := range strings.Split(string(hdr), "\n") {
-			fmt.Sscanf(l, "WIDTH %d", &w)
-			fmt.Sscanf(l, "HEIGHT %d", &h)
+	rd := bufio.NewReaderSize(stdout, 1<<20)
+	var buf []byte
+	for n := 0; ; n++ {
+		w, h, err := readPAMHeader(rd)
+		if err == io.EOF { // 沒有下一頁了
+			break
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if cap(buf) < w*h*4 {
+			buf = make([]byte, w*h*4)
+		}
+		b := buf[:w*h*4]
+		if _, err := io.ReadFull(rd, b); err != nil {
+			return fail(err)
 		}
 		checkEdge := n < len(hasTrim) && !hasTrim[n] && w > 2*band && h > 2*band
 		over, rich, edge := false, false, false
@@ -552,6 +599,13 @@ func inspectInk(pdf, dir string, hasTrim []bool) string {
 			edgePages = append(edgePages, n+1)
 		}
 	}
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Sprintf("⚠️ 總墨量檢查失敗：超過 %s 未完成", inspectTimeout)
+		}
+		return fmt.Sprintf("⚠️ 總墨量檢查失敗：%v\n%s", err, bytes.TrimSpace(errOut.Bytes()))
+	}
+
 	var lines []string
 	if len(tacPages) > 0 {
 		lines = append(lines, fmt.Sprintf("❌ 總墨量超過 %d%%：第 %s 頁（最高 %d%%，在第 %d 頁）。墨量過高容易背印、乾燥不良。",
@@ -568,4 +622,42 @@ func inspectInk(pdf, dir string, hasTrim []bool) string {
 		lines = append(lines, fmt.Sprintf("⚠️ 貼邊物件：第 %s 頁有圖文延伸到頁面邊緣，但沒有出血；裁切時邊緣可能露白，請加 %d mm 出血或內縮。", formatPages(edgePages), bleedMM))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// readPAMHeader 讀一個 PAM 標頭（P7 到 ENDHDR），回傳寬高；串流結束時回傳 io.EOF。
+func readPAMHeader(r *bufio.Reader) (w, h int, err error) {
+	line, err := r.ReadString('\n')
+	if err != nil {
+		return 0, 0, err
+	}
+	if strings.TrimSpace(line) != "P7" {
+		return 0, 0, fmt.Errorf("不是 PAM 標頭：%q", strings.TrimSpace(line))
+	}
+	depth := 0
+	for {
+		if line, err = r.ReadString('\n'); err != nil {
+			return 0, 0, err
+		}
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		if f[0] == "ENDHDR" {
+			if depth != 4 || w <= 0 || h <= 0 || w > 1<<16 || h > 1<<16 {
+				return 0, 0, fmt.Errorf("非預期的 PAM 格式：%d×%d depth=%d", w, h, depth)
+			}
+			return w, h, nil
+		}
+		if len(f) < 2 {
+			continue
+		}
+		switch f[0] {
+		case "WIDTH":
+			w, _ = strconv.Atoi(f[1])
+		case "HEIGHT":
+			h, _ = strconv.Atoi(f[1])
+		case "DEPTH":
+			depth, _ = strconv.Atoi(f[1])
+		}
+	}
 }

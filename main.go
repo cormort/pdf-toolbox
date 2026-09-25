@@ -80,7 +80,9 @@ func main() {
 		go exitWhenIdle(5 * time.Minute)
 	}
 	log.Println("PDF Toolbox 服務：", url)
-	log.Fatal(http.Serve(ln, guard(mux)))
+	// 不加 WriteTimeout／IdleTimeout：CMYK 轉換可能跑好幾分鐘
+	srv := &http.Server{Handler: guard(mux), ReadHeaderTimeout: 10 * time.Second}
+	log.Fatal(srv.Serve(ln))
 }
 
 func guard(h http.Handler) http.Handler {
@@ -107,6 +109,25 @@ func exitWhenIdle(idle time.Duration) {
 	}
 }
 
+// sweepJobs 清掉太久沒動過的工作目錄。上傳的檔案與轉檔結果都放在那裡，
+// 開著程式連續轉很多檔時不該一直累積在磁碟上；下載連結保留 maxAge 這麼久才失效。
+// workDir 底下還有 icc/（啟動時解出來的 ICC Profile），只認工作編號才不會清到它。
+func sweepJobs(maxAge time.Duration) {
+	ents, err := os.ReadDir(workDir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		p := filepath.Join(workDir, e.Name())
+		if !isJobID(e.Name()) {
+			continue
+		}
+		if fi, err := os.Stat(p); err == nil && time.Since(fi.ModTime()) > maxAge {
+			os.RemoveAll(p)
+		}
+	}
+}
+
 func openWindow(url string) {
 	switch runtime.GOOS {
 	case "darwin":
@@ -124,12 +145,17 @@ func openWindow(url string) {
 	} {
 		if _, err := os.Stat(p); err == nil {
 			// 獨立 profile 放在 exe 旁邊：設定跟著資料夾走，也不干擾平常用的瀏覽器
-			exec.Command(p, "--app="+url, "--user-data-dir="+filepath.Join(exeDir, "profile"),
+			err := exec.Command(p, "--app="+url, "--user-data-dir="+filepath.Join(exeDir, "profile"),
 				"--no-first-run", "--window-size=1400,900").Start()
-			return
+			if err == nil {
+				return
+			}
+			log.Printf("開視窗失敗（%s）：%v，改試下一個瀏覽器", p, err)
 		}
 	}
-	exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	if err := exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start(); err != nil {
+		log.Printf("開視窗失敗：%v；請手動連到 %s", err, url)
+	}
 }
 
 // serveCJKFont 讓 pdf_recompose 用電腦內建的中文字型，不必在包裡帶 7 MB 的思源黑體。

@@ -88,7 +88,7 @@ func TestCMYKEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return inspectInk(out, workDir, nil), s
+		return inspectInk(out, nil), s
 	}
 
 	ink, after := convert(in)
@@ -146,11 +146,62 @@ func TestEdgeCheck(t *testing.T) {
 	if _, err := runGS(time.Minute, "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite", "-sOutputFile="+pdf, ps); err != nil {
 		t.Fatal(err)
 	}
-	if got := inspectInk(pdf, workDir, []bool{false}); !strings.Contains(got, "⚠️ 貼邊物件：第 1 頁") {
+	if got := inspectInk(pdf, []bool{false}); !strings.Contains(got, "⚠️ 貼邊物件：第 1 頁") {
 		t.Errorf("沒有裁切框應警告貼邊：%s", got)
 	}
-	if got := inspectInk(pdf, workDir, []bool{true}); strings.Contains(got, "貼邊") {
+	if got := inspectInk(pdf, []bool{true}); strings.Contains(got, "貼邊") {
 		t.Errorf("有裁切框不應檢查貼邊：%s", got)
+	}
+}
+
+// 多頁：串流讀 PAM 時頁碼要對得上，空白頁也不能讓後面的頁碼跑掉
+func TestEdgeCheckPages(t *testing.T) {
+	workDir = t.TempDir()
+	initCMYK()
+	if gsPath == "" {
+		t.Skip("沒有 Ghostscript")
+	}
+	ps := filepath.Join(workDir, "edge3.ps")
+	os.WriteFile(ps, []byte("%!PS\n0 0 0.5 0 setcmykcolor 0 0 612 100 rectfill showpage\n"+
+		"showpage\n"+ // 第 2 頁空白
+		"0 0 0.5 0 setcmykcolor 0 0 612 100 rectfill showpage\n"), 0o644)
+	pdf := filepath.Join(workDir, "edge3.pdf")
+	if _, err := runGS(time.Minute, "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite", "-sOutputFile="+pdf, ps); err != nil {
+		t.Fatal(err)
+	}
+	got := inspectInk(pdf, []bool{false, false, false})
+	if !strings.Contains(got, "⚠️ 貼邊物件：第 1, 3 頁") {
+		t.Errorf("應只有第 1、3 頁貼邊：%s", got)
+	}
+	if got := inspectInk(pdf, nil); strings.Contains(got, "貼邊") {
+		t.Errorf("hasTrim 為 nil 時不檢查貼邊：%s", got)
+	}
+}
+
+// 工作目錄只留最近用過的：上傳的檔案不該一直躺在磁碟上，但 icc/ 不能被清掉
+func TestSweepJobs(t *testing.T) {
+	workDir = t.TempDir()
+	old, fresh := filepath.Join(workDir, randomID()), filepath.Join(workDir, randomID())
+	for _, d := range []string{old, fresh} {
+		os.MkdirAll(d, 0o755)
+		os.WriteFile(filepath.Join(d, "in.pdf"), []byte("x"), 0o644)
+	}
+	icc := filepath.Join(workDir, "icc")
+	os.MkdirAll(icc, 0o755)
+	os.WriteFile(filepath.Join(icc, "JapanColor2011Coated.icc"), []byte("x"), 0o644)
+	past := time.Now().Add(-2 * time.Hour)
+	for _, p := range []string{old, filepath.Join(old, "in.pdf"), icc, filepath.Join(icc, "JapanColor2011Coated.icc")} {
+		os.Chtimes(p, past, past)
+	}
+	sweepJobs(time.Hour)
+	if fileExists(old) {
+		t.Error("超過時限的工作目錄應該被刪掉")
+	}
+	if !fileExists(filepath.Join(fresh, "in.pdf")) {
+		t.Error("新的工作目錄不該被刪掉")
+	}
+	if !fileExists(filepath.Join(icc, "JapanColor2011Coated.icc")) {
+		t.Error("icc/ 不是工作目錄，不該被清掉")
 	}
 }
 
@@ -315,6 +366,10 @@ func TestParsePages(t *testing.T) {
 		if _, err := parsePages(bad, 5); err == nil {
 			t.Errorf("%q 應該報錯", bad)
 		}
+	}
+	// 前後相反的範圍要講清楚，不要只說「不在 1 到 5 頁之間」
+	if _, err := parsePages("5-2", 5); err == nil || !strings.Contains(err.Error(), "前後相反") {
+		t.Errorf("5-2 應該說前後相反：%v", err)
 	}
 }
 
