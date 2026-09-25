@@ -75,13 +75,7 @@ func TestCMYKEndToEnd(t *testing.T) {
 		t.Fatalf("前處理：err=%v spaces=%v changed=%d", err, before.Spaces, before.Changed)
 	}
 	convert := func(src string) (string, *scan) {
-		out := strings.TrimSuffix(src, ".pdf") + "_cmyk.pdf"
-		if _, err := runGS(time.Minute, "-dSAFER", "--permit-file-read="+slash(iccDir)+"/", "-dBATCH", "-dNOPAUSE", "-dQUIET",
-			"-sDEVICE=pdfwrite", "-dPDFSETTINGS=/prepress", "-sColorConversionStrategy=CMYK", "-dOverrideICC=true", "-dRenderIntent=1",
-			"-sDefaultRGBProfile="+filepath.Join(iccDir, "sRGB_IEC61966-2-1_no_black_scaling.icc"),
-			"-sOutputICCProfile="+filepath.Join(iccDir, "JapanColor2011Coated.icc"), "-sOutputFile="+out, src); err != nil {
-			t.Fatal(err)
-		}
+		out := gsCMYK(t, src)
 		s, err := scanPDF(out, "")
 		if err != nil {
 			t.Fatal(err)
@@ -114,6 +108,10 @@ func TestInspectBoxes(t *testing.T) {
 		{"沒有裁切框", []pageBoxes{{a4, a4, false, 0}}, []string{"ℹ️ 出血：檔案未設定裁切框", "不是 4 的倍數"}},
 		{"跨頁裁半、沒出血", []pageBoxes{{box{mm(210), 0, mm(420), mm(297)}, box{mm(210), 0, mm(420), mm(297)}, true, 0}},
 			[]string{"❌ 出血不足 3 mm：第 1 頁（最少 0.0 mm）"}},
+		{"書背側只要確認", []pageBoxes{{a4, box{-mm(3), -mm(3), mm(210), mm(300)}, true, 0}, {a4, box{0, -mm(3), mm(213), mm(300)}, true, 0}},
+			[]string{"⚠️ 書背側無出血：第 1-2 頁"}},
+		{"書背側之外也不足仍是錯誤", []pageBoxes{{a4, box{-mm(3), 0, mm(210), mm(300)}, true, 0}},
+			[]string{"❌ 出血不足 3 mm：第 1 頁（最少 0.0 mm）"}},
 		{"旋轉 90 度是橫式", []pageBoxes{{a4, bleed, true, 90}}, []string{"A4橫式"}},
 		{"混用尺寸", []pageBoxes{{a4, bleed, true, 0}, {box{0, 0, mm(297), mm(420)}, box{0, 0, mm(297), mm(420)}, false, 0}},
 			[]string{"⚠️ 成品尺寸不一致", "• A4：第 1 頁", "• A3：第 2 頁"}},
@@ -145,5 +143,49 @@ func TestEdgeCheck(t *testing.T) {
 	}
 	if got := inspectInk(pdf, workDir, []bool{true}); strings.Contains(got, "貼邊") {
 		t.Errorf("有裁切框不應檢查貼邊：%s", got)
+	}
+}
+
+// gsCMYK 用與 handleCMYK 相同的參數轉檔
+func gsCMYK(t *testing.T, src string) string {
+	out := strings.TrimSuffix(src, ".pdf") + "_cmyk.pdf"
+	if _, err := runGS(time.Minute, "-dSAFER", "--permit-file-read="+slash(iccDir)+"/", "-dBATCH", "-dNOPAUSE", "-dQUIET",
+		"-sDEVICE=pdfwrite", "-dPDFSETTINGS=/prepress", "-sColorConversionStrategy=CMYK", "-dOverrideICC=true", "-dRenderIntent=1",
+		"-sDefaultRGBProfile="+filepath.Join(iccDir, "sRGB_IEC61966-2-1_no_black_scaling.icc"),
+		"-sOutputICCProfile="+filepath.Join(iccDir, "JapanColor2011Coated.icc"), "-sOutputFile="+out, src); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// 透明、疊印、特別色：轉 CMYK 後仍在（gs 會保留特別色），而且要能在 Form 裡被找到
+func TestPrintFlags(t *testing.T) {
+	workDir = t.TempDir()
+	initCMYK()
+	if gsPath == "" {
+		t.Skip("沒有 Ghostscript")
+	}
+	ps := filepath.Join(workDir, "flags.ps")
+	os.WriteFile(ps, []byte(`%!PS
+[/Separation (PANTONE 185 C) /DeviceCMYK {dup 0 exch dup 0.8 mul exch 0 mul 0 exch}] setcolorspace
+1 setcolor 72 600 200 100 rectfill
+[/DeviceN [/Cyan /Orange] /DeviceCMYK {pop 0 exch 0.6 mul 0.9 0}] setcolorspace
+1 1 setcolor 72 400 200 100 rectfill showpage
+true setoverprint 0 0 0 1 setcmykcolor 72 600 200 100 rectfill showpage
+false setoverprint 0.5 .setfillconstantalpha 1 0 0 0 setcmykcolor 72 600 200 100 rectfill showpage
+`), 0o644)
+	in := filepath.Join(workDir, "flags.pdf")
+	if _, err := runGS(time.Minute, "-dALLOWPSTRANSPARENCY", "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite", "-sOutputFile="+in, ps); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanPDF(gsCMYK(t, in), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := inspectFlags(s)
+	for _, want := range []string{"⚠️ 透明效果：第 3 頁", "⚠️ 疊印：第 2 頁有", "⚠️ 特別色：Orange（第 1 頁）；PANTONE 185 C（第 1 頁）"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("缺少 %q\n%s", want, got)
+		}
 	}
 }

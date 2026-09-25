@@ -171,7 +171,7 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 		for i, p := range after.Pages {
 			hasTrim[i] = p.hasTrim
 		}
-		add("%s", printerReport(inspectBoxes(after.Pages), inspectInk(out, dir, hasTrim)))
+		add("%s", printerReport(inspectBoxes(after.Pages), inspectInk(out, dir, hasTrim), inspectFlags(after)))
 		add("%s", formatImages(after.Images))
 		add("%s", formatFonts(after.Fonts))
 	}
@@ -356,7 +356,7 @@ func describePageSize(w, h float64) string {
 func inspectBoxes(pages []pageBoxes) string {
 	var order []string
 	sizes := map[string][]int{}
-	var short []int
+	var short, spine []int
 	least, anyTrim := math.Inf(1), false
 	for i, p := range pages {
 		w, h := (p.trim[2]-p.trim[0])/ptPerMM, (p.trim[3]-p.trim[1])/ptPerMM
@@ -368,10 +368,16 @@ func inspectBoxes(pages []pageBoxes) string {
 			order = append(order, size)
 		}
 		sizes[size] = append(sizes[size], i+1)
-		bleed := min(p.trim[0]-p.outer[0], p.trim[1]-p.outer[1], p.outer[2]-p.trim[2], p.outer[3]-p.trim[3]) / ptPerMM
-		if bleed < bleedMM-0.1 {
+		left, bottom := (p.trim[0]-p.outer[0])/ptPerMM, (p.trim[1]-p.outer[1])/ptPerMM
+		right, top := (p.outer[2]-p.trim[2])/ptPerMM, (p.outer[3]-p.trim[3])/ptPerMM
+		enough := func(v float64) bool { return v >= bleedMM-0.1 }
+		switch {
+		case enough(left) && enough(bottom) && enough(right) && enough(top):
+		case enough(bottom) && enough(top) && enough(left) != enough(right):
+			spine = append(spine, i+1) // 只有左或右一側不足：多半是書本內頁的裝訂側
+		default:
 			short = append(short, i+1)
-			least = min(least, max(bleed, 0))
+			least = min(least, max(min(left, bottom, right, top), 0))
 		}
 		anyTrim = anyTrim || p.hasTrim
 	}
@@ -386,15 +392,45 @@ func inspectBoxes(pages []pageBoxes) string {
 		}
 	}
 	switch {
-	case len(short) == 0:
+	case len(short) == 0 && len(spine) == 0:
 		lines = append(lines, fmt.Sprintf("✅ 出血：每頁皆有至少 %d mm。", bleedMM))
 	case !anyTrim:
 		lines = append(lines, fmt.Sprintf("ℹ️ 出血：檔案未設定裁切框（TrimBox），視為無出血。若版面沒有滿版底色或貼邊圖片可以不用出血；有的話請加 %d mm 出血（見下方貼邊檢查）。", bleedMM))
 	default:
-		lines = append(lines, fmt.Sprintf("❌ 出血不足 %d mm：第 %s 頁（最少 %.1f mm）。", bleedMM, formatPages(short), least))
+		if len(short) > 0 {
+			lines = append(lines, fmt.Sprintf("❌ 出血不足 %d mm：第 %s 頁（最少 %.1f mm）。", bleedMM, formatPages(short), least))
+		}
+		if len(spine) > 0 {
+			lines = append(lines, fmt.Sprintf("⚠️ 書背側無出血：第 %s 頁只有左或右一側沒有出血。書本內頁的裝訂側不用出血；若是單張印刷品，這一側也要加 %d mm。", formatPages(spine), bleedMM))
+		}
 	}
 	if len(pages)%4 != 0 {
 		lines = append(lines, fmt.Sprintf("ℹ️ 總頁數 %d 不是 4 的倍數；若採騎馬釘裝訂需補空白頁（膠裝不受影響）。", len(pages)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// inspectFlags 報告透明效果、疊印與特別色。
+func inspectFlags(s *scan) string {
+	var lines []string
+	if len(s.Transparency) > 0 {
+		lines = append(lines, fmt.Sprintf("⚠️ 透明效果：第 %s 頁使用半透明、陰影或混合模式；較舊的印刷廠輸出系統（RIP）可能需要先平面化，請向印刷廠確認。", formatPages(s.Transparency)))
+	} else {
+		lines = append(lines, "✅ 透明效果：未使用。")
+	}
+	if len(s.Overprint) > 0 {
+		lines = append(lines, fmt.Sprintf("⚠️ 疊印：第 %s 頁有設定疊印；白色物件若設為疊印，印出來會消失，請確認是刻意設定。", formatPages(s.Overprint)))
+	} else {
+		lines = append(lines, "✅ 疊印：未設定。")
+	}
+	if len(s.SpotOrder) > 0 {
+		var spots []string
+		for _, name := range s.SpotOrder {
+			spots = append(spots, fmt.Sprintf("%s（第 %s 頁）", name, formatPages(s.Spots[name])))
+		}
+		lines = append(lines, "⚠️ 特別色："+strings.Join(spots, "；")+"。每個特別色會多出一個色版，若不是要印特別色，請改為 CMYK。")
+	} else {
+		lines = append(lines, "✅ 特別色：未使用，只有 CMYK 四色版。")
 	}
 	return strings.Join(lines, "\n")
 }

@@ -55,9 +55,11 @@ Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToo
 CMYK 預檢還沒移植的（原 Python 版有）：
 - [x] 圖片有效解析度（< 300 / 200 ppi）：追蹤 CTM、Form、軟遮罩群組與行內圖片，跳過預設隱藏的圖層；
       與 poppler `pdfimages -list` 在 164 份 PDF、31,892 筆繪圖上逐筆一致（±1 ppi）
-- [x] 成品尺寸、TrimBox／BleedBox 出血、貼邊未出血、頁數是否為 4 的倍數；框超出 MediaBox 時依規範取交集。
+- [x] 成品尺寸、TrimBox／BleedBox 出血、貼邊未出血、頁數是否為 4 的倍數；框超出 MediaBox 時依規範取交集；
+      只有左或右一側沒出血時視為書背側，列為需確認而非錯誤。
       讀框與旋轉在 299 份 PDF、9,324 頁上與 poppler `pdfinfo -box` 逐頁一致
-- [ ] 透明、疊印、特別色
+- [x] 透明、疊印、特別色：看頁面與 Form 的資源字典（gs 輸出只保留用到的資源）。與原 Python 版在 299 份 PDF 上比對，
+      297 份一致；另 2 份是原版的去重 bug（直接物件的資源字典被當成已走訪）漏報，Go 版正確
 - [ ] 小字（< 6 pt）與細線（< 0.25 pt）
 - [ ] DOCX 輸入（要帶 LibreOffice，先請使用者從 Word 存 PDF）
 

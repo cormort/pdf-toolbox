@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -25,12 +26,16 @@ type scan struct {
 	Changed int             // 改成灰階的次數
 	Images  []imageUse      // 每一次畫圖（同一張圖畫兩次算兩筆，同 pdfimages）
 	Pages   []pageBoxes
-	seen    map[int]bool // 已處理的串流物件號（多頁共用同一串流時只改一次）
-	ocOff   map[int]bool // 預設關閉的圖層（OCG 物件號）
+	// 透明、疊印、特別色所在頁碼
+	Transparency, Overprint []int
+	Spots                   map[string][]int
+	SpotOrder               []string
+	seen                    map[int]bool // 已處理的串流物件號（多頁共用同一串流時只改一次）
+	ocOff                   map[int]bool // 預設關閉的圖層（OCG 物件號）
 }
 
 func newScan() *scan {
-	return &scan{Spaces: map[string]bool{}, Fonts: map[string]bool{}, seen: map[int]bool{}, ocOff: map[int]bool{}}
+	return &scan{Spaces: map[string]bool{}, Fonts: map[string]bool{}, seen: map[int]bool{}, ocOff: map[int]bool{}, Spots: map[string][]int{}}
 }
 
 // scanPDF 盤點 in；out 非空時同時做單色黑改寫，有改到才寫出 out。
@@ -88,6 +93,7 @@ func scanPDF(in, out string) (s *scan, err error) {
 		s.resources(res, 0)
 		s.images(page.Bytes(), res, identity, i, 0)
 		s.Pages = append(s.Pages, s.pageBoxes(d, inh))
+		s.pageFlags(i, res)
 	}
 	if s.rewrite && s.Changed > 0 {
 		return s, api.WriteContextFile(ctx, out)
@@ -713,4 +719,103 @@ func (s *scan) pageBoxes(d types.Dict, inh *model.InheritedPageAttrs) pageBoxes 
 	_, a := d["ArtBox"]
 	p.hasTrim = t || a
 	return p
+}
+
+// ---- 透明、疊印、特別色 ----
+
+var processColorant = map[string]bool{"All": true, "None": true, "Cyan": true, "Magenta": true, "Yellow": true, "Black": true}
+
+// pageFlags 看頁面與其 Form 的資源字典（同原 Python 版）。
+// 預檢對象是 gs 的輸出，gs 只寫出內容真的用到的資源，所以看資源就等於看實際使用。
+func (s *scan) pageFlags(page int, res types.Dict) {
+	transp, over := false, false
+	spots := map[string]bool{}
+	seen := map[int]bool{}
+	numOr := func(o types.Object, def float64) float64 {
+		switch v := s.deref(o).(type) {
+		case types.Integer:
+			return float64(v)
+		case types.Float:
+			return float64(v)
+		}
+		return def
+	}
+	isTrue := func(o types.Object) bool { b, _ := s.deref(o).(types.Boolean); return bool(b) }
+	var walk func(res types.Dict, depth int)
+	walk = func(res types.Dict, depth int) {
+		if res == nil || depth > 8 {
+			return
+		}
+		for _, g := range s.dict(res["ExtGState"]) {
+			d := s.dict(g)
+			bm := s.deref(d["BM"])
+			if a, ok := bm.(types.Array); ok && len(a) > 0 { // 混合模式陣列：第一個是首選
+				bm = s.deref(a[0])
+			}
+			sm, _ := s.deref(d["SMask"]).(types.Name)
+			if numOr(d["ca"], 1) < 1 || numOr(d["CA"], 1) < 1 || (d["SMask"] != nil && sm != "None") ||
+				(bm != nil && bm != types.Name("Normal") && bm != types.Name("Compatible")) {
+				transp = true
+			}
+			if isTrue(d["OP"]) || isTrue(d["op"]) {
+				over = true
+			}
+		}
+		for _, xo := range s.dict(res["XObject"]) {
+			sd, ok := s.deref(xo).(types.StreamDict)
+			if !ok {
+				continue
+			}
+			switch sub, _ := sd.Dict["Subtype"].(types.Name); sub {
+			case "Image":
+				if _, ok := sd.Dict["SMask"]; ok {
+					transp = true
+				}
+			case "Form":
+				if r, ok := xo.(types.IndirectRef); ok {
+					if seen[r.ObjectNumber.Value()] {
+						continue
+					}
+					seen[r.ObjectNumber.Value()] = true
+				}
+				walk(s.dict(sd.Dict["Resources"]), depth+1)
+			}
+		}
+		for _, cs := range s.dict(res["ColorSpace"]) {
+			a, ok := s.deref(cs).(types.Array)
+			if !ok || len(a) < 2 {
+				continue
+			}
+			var names []types.Object
+			switch kind, _ := s.deref(a[0]).(types.Name); kind {
+			case "Separation":
+				names = []types.Object{a[1]}
+			case "DeviceN":
+				names, _ = s.deref(a[1]).(types.Array)
+			}
+			for _, n := range names {
+				if nm, ok := s.deref(n).(types.Name); ok && !processColorant[string(nm)] {
+					spots[string(nm)] = true
+				}
+			}
+		}
+	}
+	walk(res, 0)
+	if transp {
+		s.Transparency = append(s.Transparency, page)
+	}
+	if over {
+		s.Overprint = append(s.Overprint, page)
+	}
+	names := make([]string, 0, len(spots))
+	for name := range spots {
+		names = append(names, name)
+	}
+	sort.Strings(names) // 同一頁新出現的特別色依名稱排，報告順序才穩定
+	for _, name := range names {
+		if len(s.Spots[name]) == 0 {
+			s.SpotOrder = append(s.SpotOrder, name)
+		}
+		s.Spots[name] = append(s.Spots[name], page)
+	}
 }
