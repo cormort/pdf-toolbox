@@ -4,30 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>中繼資料</title>
+<link rel="stylesheet" href="/tool.css">
 <style>
-  :root { --bg:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#dcdcd8; --soft:#f6f6f4; --accent:#1d1d1f; --accent-ink:#fff; --warn:#b3261e; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#161617; --ink:#ececec; --mute:#98989d; --line:#3a3a3d; --soft:#1f1f21; --accent:#ececec; --accent-ink:#161617; --warn:#ff8a80; }
-  }
-  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
-  .wrap { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
-  h1 { font-size:1.5rem; margin:0 0 4px; }
-  p.lead { color:var(--mute); margin:0 0 24px; }
-  #drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:32px 16px; text-align:center; cursor:pointer; background:var(--soft); }
-  #drop.over { border-color:var(--ink); }
-  #drop strong { display:block; font-size:1.1rem; }
-  #file { display:none; }
-  fieldset { border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:18px 0 0; }
-  legend { padding:0 6px; color:var(--mute); }
+legend { padding:0 6px; color:var(--mute); }
   .f { display:flex; gap:10px; align-items:center; margin-bottom:8px; }
   .f label { flex:0 0 8.5em; color:var(--mute); }
-  .f input { flex:1; box-sizing:border-box; font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
-  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:20px 0; }
-  button, a.btn { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; }
-  button:disabled { opacity:.4; cursor:default; }
-  #msg.warn { color:var(--warn); }
+  .f input { flex:1; max-width:none; box-sizing:border-box; font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
   #extra { color:var(--mute); font-size:.9rem; margin:6px 0 0; }
-  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
@@ -36,10 +19,12 @@
   <p class="lead">讀出、修改或清除 PDF 的標題、作者、產生軟體等資訊，以及內嵌的 XMP。寄件前清一清比較不洩漏來源。
     清除後輸出檔只會留下寫入工具自己的產生軟體名稱與時間戳（任何 PDF 寫入器都會蓋），原本的作者、公司、軟體路徑都會消失。</p>
 
-  <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong></label>
+  <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong>
+    <span>作者、公司、產生軟體都藏在這裡，寄件前清一清</span>
+  </label>
   <input id="file" type="file" accept=".pdf,application/pdf">
 
-  <fieldset id="box" hidden>
+  <fieldset id="box" class="panel" hidden>
     <legend id="legend"></legend>
     <div id="fields"></div>
     <p id="extra"></p>
@@ -47,8 +32,8 @@
 
   <div class="row">
     <button id="save" disabled>套用變更</button>
-    <button id="clear" disabled>清除全部中繼資料</button>
-    <a id="dl" class="btn" hidden>下載</a>
+    <button id="clear" class="danger" disabled>清除全部中繼資料</button>
+    <a id="dl" class="btn" hidden>下載 PDF</a>
     <span id="msg"></span>
   </div>
 </div>
@@ -63,7 +48,6 @@ function pick(f) {
   $('name').textContent = f.name;
   $('dl').hidden = true;
   $('msg').className = '';
-  $('msg').textContent = '讀取中…';
   read();
 }
 $('file').onchange = e => pick(e.target.files[0]);
@@ -72,19 +56,25 @@ drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
 
-async function send(action) {
+async function send(action, label) {
   const body = new FormData();
   body.append('file', file);
   body.append('action', action);
   for (const k of KEYS) if ($(k)) body.append(k, $(k).value);
-  const res = await (await fetch('/api/metadata', { method: 'POST', body })).json();
-  if (!res.ok) throw new Error(res.message);
-  return res;
+  const t0 = Date.now();
+  const tick = setInterval(() => $('msg').textContent = `${label}… ${Math.round((Date.now() - t0) / 1000)} 秒`, 500);
+  try {
+    const res = await (await fetch('/api/metadata', { method: 'POST', body })).json();
+    if (!res.ok) throw new Error(res.message);
+    return res;
+  } finally {
+    clearInterval(tick);
+  }
 }
 
 async function read() {
   try {
-    const res = await send('read');
+    const res = await send('read', '讀取中');
     $('fields').replaceChildren(...KEYS.map(k => {
       const row = document.createElement('div');
       row.className = 'f';
@@ -122,12 +112,12 @@ function done(res) {
 
 $('save').onclick = async () => {
   $('save').disabled = $('clear').disabled = true;
-  try { done(await send('save')); } catch (e) { $('msg').textContent = '' + e.message; $('msg').className = 'warn'; }
+  try { done(await send('save', '套用中')); } catch (e) { $('msg').textContent = '' + e.message; $('msg').className = 'warn'; }
   finally { $('save').disabled = $('clear').disabled = false; }
 };
 $('clear').onclick = async () => {
   $('save').disabled = $('clear').disabled = true;
-  try { done(await send('clear')); } catch (e) { $('msg').textContent = '' + e.message; $('msg').className = 'warn'; }
+  try { done(await send('clear', '清除中')); } catch (e) { $('msg').textContent = '' + e.message; $('msg').className = 'warn'; }
   finally { $('save').disabled = $('clear').disabled = false; }
 };
 </script>

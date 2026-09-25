@@ -4,29 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>頁面尺寸統一</title>
-<style>
-  :root { --bg:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#dcdcd8; --soft:#f6f6f4; --accent:#1d1d1f; --accent-ink:#fff; --warn:#b3261e; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#161617; --ink:#ececec; --mute:#98989d; --line:#3a3a3d; --soft:#1f1f21; --accent:#ececec; --accent-ink:#161617; --warn:#ff8a80; }
-  }
-  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
-  .wrap { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
-  h1 { font-size:1.5rem; margin:0 0 4px; }
-  p.lead { color:var(--mute); margin:0 0 24px; }
-  #drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:32px 16px; text-align:center; cursor:pointer; background:var(--soft); }
-  #drop.over { border-color:var(--ink); }
-  #drop strong { display:block; font-size:1.1rem; }
-  #file { display:none; }
-  .field { margin:16px 0; }
-  .field > span { display:block; font-weight:600; margin-bottom:4px; }
-  .field small { display:block; color:var(--mute); }
-  .opts { display:flex; flex-wrap:wrap; gap:6px 20px; }
-  select { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
-  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:20px 0; }
-  button, a.btn { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; }
-  button:disabled { opacity:.4; cursor:default; }
-  #msg.warn { color:var(--warn); }
-</style>
+<link rel="stylesheet" href="/tool.css">
 </head>
 <body>
 <div class="wrap">
@@ -34,7 +12,9 @@
   <p class="lead">把每一頁統一成同一個尺寸（內容等比縮放、置中），適合把大小不一的掃描頁或附件整理成 A4 再送印。
     小頁面也會被放大填滿；不想放大就先用原尺寸處理。</p>
 
-  <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong></label>
+  <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong>
+    <span>內容等比縮放並置中，小頁面也會放大</span>
+  </label>
   <input id="file" type="file" accept=".pdf,application/pdf">
 
   <div class="field">
@@ -89,6 +69,8 @@ $('go').onclick = async () => {
   $('dl').hidden = true;
   $('msg').className = '';
   $('msg').textContent = '處理中…';
+  const t0 = Date.now();
+  const tick = setInterval(() => $('msg').textContent = `處理中… ${Math.round((Date.now() - t0) / 1000)} 秒`, 500);
   try {
     const res = await (await fetch('/api/resize', { method: 'POST', body })).json();
     $('msg').textContent = res.ok ? res.message : res.message;
@@ -98,6 +80,7 @@ $('go').onclick = async () => {
     $('msg').textContent = '無法連到背景服務：' + e;
     $('msg').className = 'warn';
   } finally {
+    clearInterval(tick);
     $('go').disabled = false;
   }
 };

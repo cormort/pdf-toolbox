@@ -4,25 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RGB → CMYK</title>
+<link rel="stylesheet" href="/tool.css">
 <style>
-  :root { --bg:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#dcdcd8; --soft:#f6f6f4; --accent:#1d1d1f; --accent-ink:#fff; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#161617; --ink:#ececec; --mute:#98989d; --line:#3a3a3d; --soft:#1f1f21; --accent:#ececec; --accent-ink:#161617; }
-  }
-  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
-  .wrap { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
-  h1 { font-size:1.5rem; margin:0 0 4px; }
-  p.lead { color:var(--mute); margin:0 0 24px; }
-  #drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:40px 16px; text-align:center; cursor:pointer; background:var(--soft); }
-  #drop.over { border-color:var(--ink); }
-  #drop strong { display:block; font-size:1.1rem; }
-  #drop span { color:var(--mute); }
-  #file { display:none; }
-  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:16px 0; }
-  button, a.btn { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; }
-  button:disabled { opacity:.4; cursor:default; }
-  #report { white-space:pre-wrap; background:var(--soft); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
-  #report:empty { display:none; }
+#report { white-space:pre-wrap; }
   #report section + section { border-top:1px solid var(--line); margin-top:12px; padding-top:12px; }
 </style>
 </head>
@@ -42,10 +26,10 @@
   </div>
   <div class="row">
     <button id="go" disabled>轉換</button>
-    <a id="dl" class="btn" hidden>下載 CMYK PDF</a>
-    <span id="status"></span>
+    <a id="dl" class="btn" hidden>下載 PDF</a>
+    <span id="msg"></span>
   </div>
-  <div id="report"></div>
+  <div id="report" class="panel"></div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -72,7 +56,7 @@ $('go').onclick = async () => {
   $('dl').hidden = true;
   $('report').textContent = '';
   const t0 = Date.now();
-  const tick = setInterval(() => $('status').textContent = `轉換中… ${Math.round((Date.now() - t0) / 1000)} 秒`, 500);
+  const tick = setInterval(() => $('msg').textContent = `轉換中… ${Math.round((Date.now() - t0) / 1000)} 秒`, 500);
   try {
     const res = await (await fetch('/api/cmyk', { method: 'POST', body })).json();
     $('report').replaceChildren(...res.report.map(t => Object.assign(document.createElement('section'), { textContent: t })));
@@ -80,9 +64,9 @@ $('go').onclick = async () => {
       $('dl').href = res.download;
       $('dl').hidden = false;
     }
-    $('status').textContent = res.ok ? '完成' : '失敗';
+    $('msg').textContent = res.ok ? '完成' : '失敗';
   } catch (e) {
-    $('status').textContent = '無法連到背景服務：' + e;
+    $('msg').textContent = '無法連到背景服務：' + e;
   } finally {
     clearInterval(tick);
     $('go').disabled = false;
