@@ -56,7 +56,8 @@ go test ./...      # 內容串流改寫＋端到端（需要 gs 在 PATH）
 node hover-check.mjs  # 用 Edge 實際量 hover／focus 的樣式（需要 Node 22+ 與 Edge；改 CSS 時跑）
 ```
 
-Windows 上開發：裝 Go 後同樣 `go run . -dev`；測試前把 `dist\PdfToolbox\gs\bin` 加進 PATH。
+Windows 上開發：裝 Go 後同樣 `go run . -dev`（Go 請正式安裝、讓它在 PATH 上，版本以 `go.mod` 為準；
+臨時 export 到暫存資料夾的 Go 哪天被清掉，`build.sh` 就會失敗）；測試前把 `dist\PdfToolbox\gs\bin` 加進 PATH。
 `sync.sh`／`build.sh` 用 Git Bash 跑（build 另需 7-Zip）。
 
 ### 樣式改動怎麼驗（`hover-check.mjs`）

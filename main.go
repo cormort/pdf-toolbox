@@ -173,9 +173,12 @@ func openWindow(url string) {
 		os.Getenv("LocalAppData") + `\Google\Chrome\Application\chrome.exe`,
 	} {
 		if _, err := os.Stat(p); err == nil {
-			// 獨立 profile 放在 exe 旁邊：設定跟著資料夾走，也不干擾平常用的瀏覽器
+			// 獨立 profile 放在 exe 旁邊：設定跟著資料夾走，也不干擾平常用的瀏覽器。
+			// Edge 會拿 Windows 的 Microsoft 帳號自動登入新 profile 並跳「同步瀏覽資料」對話框：
+			// msImplicitSignin 擋自動登入，--disable-sync 擋已登入過的舊 profile 再跳同步（Chrome 不認得前者，會忽略）
 			err := exec.Command(p, "--app="+url, "--user-data-dir="+filepath.Join(exeDir, "profile"),
-				"--no-first-run", "--window-size=1400,900").Start()
+				"--no-first-run", "--disable-sync", "--disable-features=msImplicitSignin",
+				"--window-size=1400,900").Start()
 			if err == nil {
 				return
 			}

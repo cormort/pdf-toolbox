@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 # Windows 裝 7-Zip 預設不會加進 PATH
 command -v 7z >/dev/null || [ ! -x "/c/Program Files/7-Zip/7z.exe" ] || PATH="/c/Program Files/7-Zip:$PATH"
+command -v go >/dev/null || { echo "找不到 go：請正式安裝 Go（版本以 go.mod 為準），重開終端機再跑" >&2; exit 1; }
 GS_TAG=gs10080   # Ghostscript 10.08.0，官方 Artifex 釋出
 out=dist/PdfToolbox
 
