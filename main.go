@@ -68,6 +68,7 @@ func main() {
 	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "pdf-toolbox") })
 	mux.HandleFunc("GET /recompose/fonts/NotoSansTC-Regular.ttf", serveCJKFont)
 	mux.HandleFunc("POST /api/cmyk", handleCMYK)
+	mux.HandleFunc("POST /api/compress", handleCompress)
 	mux.HandleFunc("GET /api/file/{id}/{name}", handleFile)
 
 	lastHit.Store(time.Now().Unix())

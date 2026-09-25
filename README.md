@@ -9,6 +9,7 @@
 | 資料列分頁調整 | [pdf-row-shifter](https://github.com/cormort/pdf-row-shifter) | 單一 HTML |
 | 對開表排版 | [xls2spread](https://github.com/cormort/xls2spread) | 單一 HTML |
 | PDF 比對 | [diffpdf-web](https://github.com/cormort/diffpdf-web) | 單一 HTML |
+| 壓縮 PDF | 本 repo（`compress.go`、`web/compress/`） | Go + Ghostscript |
 | RGB → CMYK | 本 repo（Go 重寫 [PDF_RGB2CMYK](https://huggingface.co/spaces/cormort/PDF_RGB2CMYK) 的核心） | Go + Ghostscript |
 
 ## 架構
@@ -70,7 +71,11 @@ CMYK 預檢（原 Python 版的項目已全部移植）：
 - [x] 頁面整理、浮水印、頁碼：由 pdf_recompose 提供
       已知：pdf_recompose 嵌入中文字型不子集化，每份輸出多一整個字型檔。pdf-lib 的 `subset: true` 會缺字，
       經 gs 重寫則中文無法搜尋，暫維持現況；可評估改用 `@cantoo/pdf-lib`
-- [ ] 壓縮 PDF（gs）、加密／移除密碼（pdfcpu）、PDF 轉圖片（gs）
+- [x] 壓縮 PDF（gs，三種程度，色彩不變）：壓縮後在瀏覽器用 pdf.js 逐頁比對文字（NFC、不看順序），有字無法搜尋就警告並列出頁碼
+- [ ] 加密／移除密碼（pdfcpu）、PDF 轉圖片（gs）
+
+已知：Ghostscript 重寫 PDF 時，部分字型的文字對應會被丟掉或寫錯（畫面、列印正常，但無法搜尋）。61 份抽樣裡 12 份有此現象；
+pdf-lib 嵌入的 Identity-H 中文字型可把原檔的 ToUnicode 補回（`tounicode.go`，壓縮與 CMYK 都會做），其他情況只能靠壓縮頁的文字比對提醒。
 - [ ] Word／Excel／PPT 轉 PDF（呼叫本機 Office）、網頁轉 PDF（Edge headless）
 - [ ] OCR（可攜 Tesseract + 繁中語言檔）、密文遮蔽（整頁點陣化）
 - [ ] 工具間傳檔（例如比對結果送 CMYK），有需要再做

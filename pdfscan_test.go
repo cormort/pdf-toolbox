@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
@@ -201,5 +202,49 @@ func TestTextLines(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("缺少 %q\n%s", want, got)
 		}
+	}
+}
+
+// pdf-lib 嵌入的中文字型經 gs 會掉 ToUnicode（文字無法搜尋），restoreToUnicode 要補回來。
+// testdata/pdflib_cjk.pdf 由 pdf-lib 產生（Identity-H 的 CID 字型）。
+func TestRestoreToUnicode(t *testing.T) {
+	workDir = t.TempDir()
+	initCMYK()
+	if gsPath == "" {
+		t.Skip("沒有 Ghostscript")
+	}
+	out := filepath.Join(workDir, "out.pdf")
+	if _, err := runGS(time.Minute, "-dSAFER", "-dBATCH", "-dNOPAUSE", "-dQUIET", "-sDEVICE=pdfwrite", "-dPDFSETTINGS=/ebook", "-sOutputFile="+out, "testdata/pdflib_cjk.pdf"); err != nil {
+		t.Fatal(err)
+	}
+	missing := func() int {
+		ctx, err := readPDF(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, d := range cidFonts(ctx.XRefTable) {
+			if _, ok := d["ToUnicode"]; !ok {
+				n++
+			}
+		}
+		return n
+	}
+	// 小檔經 gs 不一定會掉（實際會掉的是未子集化的整個字型，檔案太大不放進 repo），所以自己拿掉來模擬
+	ctx, err := readPDF(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range cidFonts(ctx.XRefTable) {
+		delete(d, "ToUnicode")
+	}
+	if err := api.WriteContextFile(ctx, out); err != nil || missing() == 0 {
+		t.Fatalf("模擬失敗：%v", err)
+	}
+	if n, err := restoreToUnicode("testdata/pdflib_cjk.pdf", out); err != nil || n == 0 {
+		t.Fatalf("補回 %d 個，err=%v", n, err)
+	}
+	if m := missing(); m != 0 {
+		t.Errorf("仍有 %d 個字型缺 ToUnicode", m)
 	}
 }

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>壓縮 PDF</title>
+<style>
+  :root { --bg:#fff; --ink:#1d1d1f; --mute:#6e6e73; --line:#dcdcd8; --soft:#f6f6f4; --accent:#1d1d1f; --accent-ink:#fff; --warn:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161617; --ink:#ececec; --mute:#98989d; --line:#3a3a3d; --soft:#1f1f21; --accent:#ececec; --accent-ink:#161617; --warn:#ff8a80; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  p.lead { color:var(--mute); margin:0 0 24px; }
+  #drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:40px 16px; text-align:center; cursor:pointer; background:var(--soft); }
+  #drop.over { border-color:var(--ink); }
+  #drop strong { display:block; font-size:1.1rem; }
+  #drop span { color:var(--mute); }
+  #file { display:none; }
+  fieldset { border:0; padding:0; margin:16px 0; display:flex; flex-wrap:wrap; gap:8px 20px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:16px 0; }
+  button, a.btn { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; text-decoration:none; }
+  button:disabled { opacity:.4; cursor:default; }
+  #report { background:var(--soft); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+  #report:empty { display:none; }
+  #report p { margin:0 0 8px; }
+  #report p:last-child { margin:0; }
+  .warn { color:var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>壓縮 PDF</h1>
+  <p class="lead">降低圖片解析度、只嵌入用到的字、去除重複內容。色彩保持原樣，檔案只在這台電腦處理。</p>
+
+  <label id="drop" for="file">
+    <strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong>
+    <span>掃描檔、照片多的檔案效果最明顯</span>
+  </label>
+  <input id="file" type="file" accept=".pdf,application/pdf">
+
+  <fieldset>
+    <label><input type="radio" name="level" value="screen"> 高壓縮（圖片 72 ppi，螢幕瀏覽）</label>
+    <label><input type="radio" name="level" value="ebook" checked> 標準（150 ppi，一般閱讀、寄送）</label>
+    <label><input type="radio" name="level" value="printer"> 輕度（300 ppi，列印）</label>
+  </fieldset>
+  <div class="row">
+    <button id="go" disabled>壓縮</button>
+    <a id="dl" class="btn" hidden>下載壓縮檔</a>
+    <span id="status"></span>
+  </div>
+  <div id="report"></div>
+</div>
+<script type="module">
+import * as pdfjs from '/vendor/pdfjs-4.10.38/pdf.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs-4.10.38/pdf.worker.min.mjs';
+
+const $ = id => document.getElementById(id);
+let file = null;
+function pick(f) {
+  if (!f) return;
+  file = f;
+  $('name').textContent = f.name;
+  $('go').disabled = false;
+  $('dl').hidden = true;
+  $('report').replaceChildren();
+}
+$('file').onchange = e => pick(e.target.files[0]);
+const drop = $('drop');
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
+
+const mb = n => (n / 1024 / 1024).toFixed(2) + ' MB';
+function say(text, cls) {
+  $('report').append(Object.assign(document.createElement('p'), { textContent: text, className: cls || '' }));
+}
+
+// 每頁文字的字元統計：去掉空白、NFC 正規化（相容表意文字與一般漢字視為同字），不看順序
+async function pageBags(data) {
+  const doc = await pdfjs.getDocument({ data }).promise;
+  const bags = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const text = (await page.getTextContent()).items.map(it => it.str).join('').normalize('NFC').replace(/\s/g, '');
+    const bag = new Map();
+    for (const c of text) bag.set(c, (bag.get(c) || 0) + 1);
+    bags.push(bag);
+    page.cleanup();
+  }
+  return bags;
+}
+
+// 比對壓縮前後每頁的文字，回傳有字不見的頁碼與遺失比例
+async function textCheck(before, after) {
+  const [a, b] = await Promise.all([pageBags(before), pageBags(after)]);
+  let total = 0, lost = 0;
+  const pages = [];
+  a.forEach((bag, i) => {
+    let miss = 0;
+    for (const [c, n] of bag) {
+      total += n;
+      miss += Math.max(0, n - (b[i]?.get(c) || 0));
+    }
+    lost += miss;
+    if (miss) pages.push(i + 1);
+  });
+  return { total, lost, pages };
+}
+
+function pageList(pages) {
+  const shown = pages.slice(0, 20).join(', ');
+  return pages.length > 20 ? `${shown} 等，共 ${pages.length} 頁` : shown;
+}
+
+$('go').onclick = async () => {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('level', document.querySelector('[name=level]:checked').value);
+  $('go').disabled = true;
+  $('dl').hidden = true;
+  $('report').replaceChildren();
+  const t0 = Date.now();
+  const tick = setInterval(() => $('status').textContent = `壓縮中… ${Math.round((Date.now() - t0) / 1000)} 秒`, 500);
+  try {
+    const res = await (await fetch('/api/compress', { method: 'POST', body })).json();
+    clearInterval(tick);
+    if (!res.ok) {
+      say(res.message, 'warn');
+      $('status').textContent = '失敗';
+      return;
+    }
+    if (!res.download) {
+      say(res.message);
+      $('status').textContent = '完成';
+      return;
+    }
+    const pct = Math.round((1 - res.outSize / res.inSize) * 100);
+    say(`✅ ${mb(res.inSize)} → ${mb(res.outSize)}（減少 ${pct}%）`);
+    $('dl').href = res.download;
+    $('dl').hidden = false;
+
+    $('status').textContent = '檢查文字是否保留…';
+    const after = new Uint8Array(await (await fetch(res.download)).arrayBuffer());
+    const { total, lost, pages } = await textCheck(new Uint8Array(await file.arrayBuffer()), after);
+    if (!total) say('ℹ️ 原檔沒有可搜尋的文字（可能是掃描檔），不影響。');
+    else if (!lost) say('✅ 文字檢查：可搜尋、可複製的文字完整保留。');
+    else say(`⚠️ 文字檢查：約 ${Math.max(0.1, lost / total * 100).toFixed(1)}% 的文字在壓縮後無法正確搜尋或複製（第 ${pageList(pages)} 頁）。畫面與列印不受影響；需要搜尋、複製文字時請保留原檔。`, 'warn');
+    $('status').textContent = '完成';
+  } catch (e) {
+    clearInterval(tick);
+    $('status').textContent = '發生錯誤：' + e;
+  } finally {
+    $('go').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

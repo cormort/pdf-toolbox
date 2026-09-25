@@ -97,34 +97,15 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 	defer func() { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(res) }()
 	add := func(format string, a ...any) { res.Report = append(res.Report, fmt.Sprintf(format, a...)) }
 
-	if gsPath == "" {
-		add("❌ 找不到 Ghostscript：請把 gs 資料夾放在 PdfToolbox.exe 旁邊（gs\\bin\\gswin64c.exe）。")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
-	file, hdr, err := r.FormFile("file")
-	if err != nil {
-		add("❌ 沒有收到檔案：%v", err)
-		return
-	}
-	defer file.Close()
-	if !strings.EqualFold(filepath.Ext(hdr.Filename), ".pdf") {
-		add("❌ 只支援 PDF；Word 檔請先在 Word 另存成 PDF（版面最準）。")
-		return
-	}
-
-	id := randomID()
-	dir := filepath.Join(workDir, id)
-	os.MkdirAll(dir, 0o755)
-	// 暫存檔一律用 ASCII 檔名，原檔名只用在下載名稱，避開中文路徑的問題
-	in := filepath.Join(dir, "in.pdf")
-	if err := saveTo(in, file); err != nil {
-		add("❌ 無法儲存上傳檔：%v", err)
+	id, dir, in, name, msg := receivePDF(w, r)
+	if msg != "" {
+		add("%s", msg)
 		return
 	}
 
 	src := in
 	var before *scan
+	var err error
 	if r.FormValue("forceK") == "1" {
 		k := filepath.Join(dir, "k.pdf")
 		before, err = scanPDF(in, k)
@@ -157,6 +138,7 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 		add("❌ Ghostscript 轉換失敗：%v", err)
 		return
 	}
+	restoreToUnicode(src, out) // gs 會丟掉部分中文字型的文字對應，補回來才搜尋得到
 	st, _ := os.Stat(out)
 	add("✅ CMYK 轉換完成\n📦 檔案大小：%.2f MB\n🔧 Ghostscript：%s\n📐 ICC Profile：%s\n🖼️ 彩色／灰階圖片上限 300 ppi，單色 1200 ppi\n🔤 字型：要求嵌入及子集化",
 		float64(st.Size())/1024/1024, gsVersion, cmykProfileName)
@@ -177,9 +159,34 @@ func handleCMYK(w http.ResponseWriter, r *http.Request) {
 	}
 	add("⚠️ 本工具產生的是指定 ICC Profile 的 CMYK PDF，不等同於已通過 PDF/X 認證。\n⚠️ 若原始圖片解析度不足，轉成 300 ppi 不會憑空增加細節。")
 
-	name := strings.TrimSuffix(hdr.Filename, filepath.Ext(hdr.Filename)) + "_cmyk.pdf"
 	res.OK = true
-	res.Download = "/api/file/" + id + "/" + url.PathEscape(name)
+	res.Download = "/api/file/" + id + "/" + url.PathEscape(name+"_cmyk.pdf")
+}
+
+// receivePDF 收下上傳的 PDF，存成工作目錄裡的 in.pdf。
+// 暫存檔一律用 ASCII 檔名，原檔名（不含副檔名）只用在下載名稱，避開中文路徑的問題。
+// 失敗時 msg 是給使用者看的訊息。
+func receivePDF(w http.ResponseWriter, r *http.Request) (id, dir, in, name, msg string) {
+	if gsPath == "" {
+		return "", "", "", "", "❌ 找不到 Ghostscript：請把 gs 資料夾放在 PdfToolbox.exe 旁邊（gs\\bin\\gswin64c.exe）。"
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<30)
+	file, hdr, err := r.FormFile("file")
+	if err != nil {
+		return "", "", "", "", "❌ 沒有收到檔案：" + err.Error()
+	}
+	defer file.Close()
+	if !strings.EqualFold(filepath.Ext(hdr.Filename), ".pdf") {
+		return "", "", "", "", "❌ 只支援 PDF；Word 檔請先在 Word 另存成 PDF（版面最準）。"
+	}
+	id = randomID()
+	dir = filepath.Join(workDir, id)
+	os.MkdirAll(dir, 0o755)
+	in = filepath.Join(dir, "in.pdf")
+	if err := saveTo(in, file); err != nil {
+		return "", "", "", "", "❌ 無法儲存上傳檔：" + err.Error()
+	}
+	return id, dir, in, strings.TrimSuffix(hdr.Filename, filepath.Ext(hdr.Filename)), ""
 }
 
 func handleFile(w http.ResponseWriter, r *http.Request) {
