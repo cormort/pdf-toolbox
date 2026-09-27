@@ -1,4 +1,4 @@
-/* 自製工具頁的共用樣式與設計語言。九個頁面（compress／images／cmyk／protect／
+/* 自製工具頁的共用樣式與設計語言。十個頁面（compress／images／cmyk／protect／sign／
    extract／metadata／text／resize 與首頁外框）都連這一份，改一次全部生效；各頁自己的
    <style> 只留該頁特有的規則。
    順序：變數 → 版面 → 表單 → 按鈕（一般 → danger）→ 面板／分段 → 共用零件。

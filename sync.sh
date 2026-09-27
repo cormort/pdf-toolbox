@@ -38,6 +38,7 @@ vendor https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js 
 vendor https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs         pdfjs-4.10.38/pdf.min.mjs
 vendor https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs  pdfjs-4.10.38/pdf.worker.min.mjs
 vendor https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.3/jspdf.umd.min.js       jspdf-3.0.3/jspdf.umd.min.js
+vendor https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js        pdf-lib-1.17.1/pdf-lib.min.js
 
 for f in web/row-shifter/index.html web/xls2spread/index.html web/diffpdf/index.html web/viewer/index.html web/recompose/index.html; do
   perl -0pi -e '

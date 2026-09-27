@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>簽名</title>
+<link rel="stylesheet" href="/tool.css">
+<style>
+  .wrap { max-width:960px; }
+  #pad { display:block; width:100%; max-width:600px; aspect-ratio:3/1; background:#fff; border:1px solid var(--line); border-radius:var(--r-md); touch-action:none; cursor:crosshair; }
+  #preview { display:block; max-width:100%; max-height:200px; background:repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0/16px 16px; border:1px solid var(--line); border-radius:var(--r-md); }
+  #typed { font-size:1.2rem; }
+  input[type=range] { width:180px; vertical-align:middle; }
+  input[type=color] { vertical-align:middle; }
+  #saved { display:flex; flex-wrap:wrap; gap:8px; }
+  #saved .sig { position:relative; width:150px; height:60px; display:flex; align-items:center; justify-content:center;
+                background:#fff; border:2px solid var(--line); border-radius:var(--r-md); cursor:pointer; padding:4px; }
+  #saved .sig[aria-pressed=true] { border-color:var(--accent); }
+  #saved .sig img { max-width:100%; max-height:100%; }
+  #saved .sig b { position:absolute; top:-8px; right:-8px; width:20px; height:20px; line-height:18px; text-align:center;
+                  border-radius:50%; background:var(--warn); color:#fff; font-weight:400; }
+  #pages { margin-top:16px; }
+  .pg { position:relative; margin:0 auto 16px; box-shadow:0 1px 4px rgba(0,0,0,.25); background:#fff; }
+  .pg canvas { display:block; width:100%; height:100%; }
+  .pg.armed { cursor:copy; }
+  .pg .no { position:absolute; left:-2.5em; top:0; color:var(--mute); font-size:.85rem; }
+  .pl { position:absolute; outline:1px dashed transparent; cursor:move; touch-action:none; }
+  .pl img { width:100%; height:100%; display:block; pointer-events:none; }
+  .pl.sel { outline-color:#1a73e8; }
+  .pl i, .pl b { display:none; position:absolute; width:14px; height:14px; background:#1a73e8; }
+  .pl.sel i, .pl.sel b { display:block; }
+  .pl i { right:-7px; bottom:-7px; cursor:nwse-resize; border-radius:2px; }
+  .pl b { right:-7px; top:-7px; border-radius:50%; cursor:pointer; color:#fff; font:12px/14px sans-serif; text-align:center; }
+  .bar { position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--line); padding:8px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>簽名</h1>
+  <p class="lead">做一個簽名（手繪、輸入文字或匯入圖片），點一下頁面放上去，可拖曳、縮放、調透明度，最後另存新的 PDF。全部在瀏覽器裡處理，檔案不會離開這台電腦。</p>
+
+  <div class="seg" id="mode">
+    <button data-m="draw" aria-pressed="true">手繪</button>
+    <button data-m="type" aria-pressed="false">輸入文字</button>
+    <button data-m="image" aria-pressed="false">匯入圖片</button>
+  </div>
+
+  <div data-p="draw">
+    <canvas id="pad"></canvas>
+    <div class="row">
+      <label>顏色 <input type="color" id="drawColor" value="#1a1a8c"></label>
+      <label>線寬 <input type="range" id="drawWidth" min="1" max="12" value="4"></label>
+      <button id="clearPad" class="danger">清除</button>
+    </div>
+  </div>
+  <div data-p="type" hidden>
+    <div class="field">
+      <input type="text" id="typed" placeholder="輸入姓名">
+    </div>
+    <div class="row">
+      <label>字型 <select id="typeFont">
+        <option value='"DFKai-SB", "BiauKai", "KaiTi", serif'>標楷體</option>
+        <option value='"Microsoft JhengHei", "PingFang TC", sans-serif'>微軟正黑體</option>
+        <option value='"Segoe Script", "Brush Script MT", cursive'>英文草寫</option>
+      </select></label>
+      <label>顏色 <input type="color" id="typeColor" value="#1a1a8c"></label>
+    </div>
+  </div>
+  <div data-p="image" hidden>
+    <label id="imgDrop" class="btn" for="imgFile">選擇簽名照片或掃描檔</label>
+    <input id="imgFile" type="file" accept="image/*" hidden>
+    <div class="field">
+      <label><input type="checkbox" id="bgOn" checked> 自動去背（把紙張的底色變透明）</label>
+      <label>門檻 <input type="range" id="bgLevel" min="80" max="250" value="200"> <span id="bgVal"></span></label>
+      <small>越低去掉越多：底色沒去乾淨就往左拉，筆畫被吃掉就往右拉。載入圖片時會依紙張亮度自動設定。</small>
+    </div>
+    <label><input type="checkbox" id="imgInk"> 筆跡改成單色</label>
+    <input type="color" id="imgColor" value="#1a1a8c">
+  </div>
+
+  <div class="field">
+    <span>預覽（格子是透明的部分）</span>
+    <canvas id="preview" width="1" height="1"></canvas>
+  </div>
+  <div class="row">
+    <button id="save">存成簽名</button>
+    <span id="sigMsg"></span>
+  </div>
+
+  <div class="field">
+    <span>我的簽名</span>
+    <div id="saved"></div>
+    <small>點一下選取，再點頁面放上去。簽名只存在這台電腦的瀏覽器裡。</small>
+  </div>
+
+  <label id="drop" for="file"><strong id="name">拖放 PDF 到這裡，或點一下選擇檔案</strong>
+    <span>加了密碼的 PDF 請先用「密碼保護」移除保護</span>
+  </label>
+  <input id="file" type="file" accept=".pdf,application/pdf">
+
+  <div class="bar" id="bar" hidden>
+    <div class="row" style="margin:0">
+      <label>透明度 <input type="range" id="opacity" min="10" max="100" value="100"> <span id="opVal">100%</span></label>
+      <button id="export" disabled>另存 PDF</button>
+      <a id="dl" class="btn" hidden>下載</a>
+      <span id="msg"></span>
+    </div>
+  </div>
+  <div id="pages"></div>
+</div>
+<script type="module">
+import * as pdfjs from '/vendor/pdfjs-4.10.38/pdf.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs-4.10.38/pdf.worker.min.mjs';
+const { PDFDocument, degrees } = window.PDFLib;
+const $ = id => document.getElementById(id);
+
+// ── 做簽名 ──
+let mode = 'draw';
+for (const b of $('mode').children) b.onclick = () => {
+  mode = b.dataset.m;
+  for (const x of $('mode').children) x.setAttribute('aria-pressed', x === b);
+  for (const p of document.querySelectorAll('[data-p]')) p.hidden = p.dataset.p !== mode;
+  if (mode === 'draw') sizePad();
+  update();
+};
+
+// 手繪：畫在 600×200（乘上螢幕倍率）的畫布上，存成向量太麻煩，PNG 夠清楚
+const pad = $('pad'), pctx = pad.getContext('2d');
+let strokes = [];
+function sizePad() {
+  const r = pad.getBoundingClientRect(), k = 2;
+  if (!r.width) return;
+  pad.width = r.width * k; pad.height = r.height * k;
+  redrawPad();
+}
+function redrawPad() {
+  pctx.clearRect(0, 0, pad.width, pad.height);
+  pctx.lineCap = pctx.lineJoin = 'round';
+  pctx.strokeStyle = $('drawColor').value;
+  pctx.lineWidth = $('drawWidth').value * pad.width / 600;
+  for (const s of strokes) {
+    pctx.beginPath();
+    s.forEach(([x, y], i) => {
+      const px = x * pad.width, py = y * pad.height;
+      if (i === 0) pctx.moveTo(px, py);
+      else { const [x0, y0] = s[i - 1]; pctx.quadraticCurveTo(x0 * pad.width, y0 * pad.height, (x0 * pad.width + px) / 2, (y0 * pad.height + py) / 2); }
+    });
+    if (s.length === 1) pctx.lineTo(s[0][0] * pad.width + .1, s[0][1] * pad.height);
+    pctx.stroke();
+  }
+}
+pad.onpointerdown = e => {
+  pad.setPointerCapture(e.pointerId);
+  const r = pad.getBoundingClientRect();
+  strokes.push([[(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]]);
+  redrawPad();
+};
+pad.onpointermove = e => {
+  if (!pad.hasPointerCapture(e.pointerId)) return;
+  const r = pad.getBoundingClientRect();
+  strokes.at(-1).push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);
+  redrawPad();
+};
+pad.onpointerup = () => update();
+$('clearPad').onclick = () => { strokes = []; redrawPad(); update(); };
+$('drawColor').oninput = $('drawWidth').oninput = () => { redrawPad(); update(); };
+window.addEventListener('resize', () => mode === 'draw' && sizePad());
+
+// 輸入文字：用系統字型畫成圖，不用嵌字型
+$('typed').oninput = $('typeFont').onchange = $('typeColor').oninput = () => update();
+function typedCanvas() {
+  const t = $('typed').value.trim();
+  if (!t) return null;
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  const font = `120px ${$('typeFont').value}`;
+  x.font = font;
+  c.width = Math.ceil(x.measureText(t).width) + 60; c.height = 200;
+  x.font = font; x.fillStyle = $('typeColor').value; x.textBaseline = 'middle';
+  x.fillText(t, 30, 100);
+  return c;
+}
+
+// 匯入圖片＋去背
+let photo = null;
+$('imgFile').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  photo = await createImageBitmap(f).catch(() => null);
+  if (!photo) { $('sigMsg').textContent = '這個圖片格式讀不了'; $('sigMsg').className = 'warn'; return; }
+  $('bgLevel').value = autoLevel(photo);
+  update();
+};
+$('bgOn').onchange = $('bgLevel').oninput = $('imgInk').onchange = $('imgColor').oninput = () => update();
+
+// 最亮那一成像素的亮度當作紙張底色，門檻取它的 85%：手機拍的紙常偏灰，固定門檻會留一片灰底
+function autoLevel(bmp) {
+  const k = Math.min(1, 400 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, bmp.width * k); c.height = Math.max(1, bmp.height * k);
+  const x = c.getContext('2d'); x.drawImage(bmp, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height).data, hist = new Array(256).fill(0);
+  for (let i = 0; i < d.length; i += 4) hist[luma(d, i) | 0]++;
+  let n = 0, total = d.length / 4, paper = 255;
+  for (let v = 255; v >= 0; v--) { n += hist[v]; if (n >= total * .1) { paper = v; break; } }
+  return Math.max(80, Math.min(250, Math.round(paper * .85)));
+}
+const luma = (d, i) => .299 * d[i] + .587 * d[i + 1] + .114 * d[i + 2];
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+function imageCanvas() {
+  if (!photo) return null;
+  const k = Math.min(1, 1600 / Math.max(photo.width, photo.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(photo.width * k); c.height = Math.round(photo.height * k);
+  const x = c.getContext('2d'); x.drawImage(photo, 0, 0, c.width, c.height);
+  if (!$('bgOn').checked && !$('imgInk').checked) return c;
+  const img = x.getImageData(0, 0, c.width, c.height), d = img.data;
+  const t = +$('bgLevel').value, soft = 30, ink = $('imgInk').checked && hex($('imgColor').value);
+  for (let i = 0; i < d.length; i += 4) {
+    if ($('bgOn').checked) {
+      // 門檻以上全透明，往下 30 級漸變：筆畫邊緣不會有鋸齒或白邊
+      const a = Math.max(0, Math.min(1, (t - luma(d, i)) / soft));
+      d[i + 3] = Math.round(d[i + 3] * a);
+    }
+    if (ink) [d[i], d[i + 1], d[i + 2]] = ink;
+  }
+  x.putImageData(img, 0, 0);
+  return c;
+}
+
+// 裁掉四周透明的部分，簽名放到頁面上框才會貼齊筆跡
+function trim(c) {
+  const x = c.getContext('2d'), { data: d, width: w, height: h } = x.getImageData(0, 0, c.width, c.height);
+  let l = w, r = -1, t = h, b = -1;
+  for (let y = 0; y < h; y++) for (let i = 0; i < w; i++) if (d[(y * w + i) * 4 + 3] > 8) {
+    if (i < l) l = i; if (i > r) r = i; if (y < t) t = y; if (y > b) b = y;
+  }
+  if (r < 0) return null;
+  const m = 4, o = document.createElement('canvas');
+  l = Math.max(0, l - m); t = Math.max(0, t - m); r = Math.min(w - 1, r + m); b = Math.min(h - 1, b + m);
+  o.width = r - l + 1; o.height = b - t + 1;
+  o.getContext('2d').drawImage(c, l, t, o.width, o.height, 0, 0, o.width, o.height);
+  return o;
+}
+
+let current = null;
+function update() {
+  $('bgVal').textContent = $('bgLevel').value;
+  const src = mode === 'draw' ? (strokes.length ? pad : null) : mode === 'type' ? typedCanvas() : imageCanvas();
+  current = src && trim(src);
+  const p = $('preview');
+  p.width = current ? current.width : 1; p.height = current ? current.height : 1;
+  if (current) p.getContext('2d').drawImage(current, 0, 0);
+  $('save').disabled = !current;
+  $('sigMsg').textContent = ''; $('sigMsg').className = '';
+}
+
+// ── 存下來的簽名（localStorage，存 PNG data URL）──
+const KEY = 'sign:saved';
+let saved = [];
+try { saved = JSON.parse(localStorage.getItem(KEY)) || []; } catch {}
+let chosen = null;
+function persist() {
+  try { localStorage.setItem(KEY, JSON.stringify(saved)); return true; } catch { return false; }
+}
+function renderSaved() {
+  $('saved').replaceChildren(...saved.map(src => {
+    const d = document.createElement('div');
+    d.className = 'sig'; d.title = '點一下選取，再點頁面放上去';
+    d.setAttribute('aria-pressed', src === chosen);
+    d.innerHTML = '<img alt="簽名"><b title="刪除這個簽名">×</b>';
+    d.querySelector('img').src = src;
+    d.onclick = () => { chosen = chosen === src ? null : src; renderSaved(); };
+    d.querySelector('b').onclick = e => {
+      e.stopPropagation();
+      saved = saved.filter(s => s !== src); if (chosen === src) chosen = null;
+      persist(); renderSaved();
+    };
+    return d;
+  }));
+  for (const p of document.querySelectorAll('.pg')) p.classList.toggle('armed', !!chosen);
+}
+$('save').onclick = () => {
+  const src = current.toDataURL('image/png');
+  saved.unshift(src); chosen = src;
+  const ok = persist();
+  renderSaved();
+  $('sigMsg').textContent = ok ? (doc ? '已存，點頁面放上去' : '已存，接著選 PDF') : '瀏覽器空間不夠，這次可以用但不會留下來';
+  $('sigMsg').className = ok ? '' : 'warn';
+};
+renderSaved();
+sizePad(); update();
+
+// ── PDF：顯示頁面、放簽名 ──
+let doc = null, bytes = null, fileName = '', placed = [], sel = null;
+function pick(f) { if (f) load(f); }
+$('file').onchange = e => pick(e.target.files[0]);
+const drop = $('drop');
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
+
+async function load(f) {
+  $('name').textContent = f.name;
+  $('msg').textContent = '載入中…'; $('msg').className = '';
+  $('bar').hidden = false; $('dl').hidden = true;
+  bytes = new Uint8Array(await f.arrayBuffer());
+  fileName = f.name.replace(/\.pdf$/i, '');
+  placed = []; sel = null; $('pages').replaceChildren();
+  try {
+    doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+  } catch (e) {
+    doc = null;
+    $('msg').textContent = e.name === 'PasswordException' ? '這份 PDF 有開啟密碼，請先用「密碼保護」移除保護' : '讀不了這份 PDF：' + e.message;
+    $('msg').className = 'warn';
+    return;
+  }
+  const width = Math.min($('pages').clientWidth - 48, 900);
+  for (let n = 1; n <= doc.numPages; n++) {
+    const page = await doc.getPage(n), v1 = page.getViewport({ scale: 1 });
+    const scale = width / v1.width, v = page.getViewport({ scale: scale * devicePixelRatio });
+    const div = document.createElement('div');
+    div.className = 'pg' + (chosen ? ' armed' : ''); div.dataset.n = n;
+    div.style.width = width + 'px'; div.style.height = v1.height * scale + 'px';
+    const c = document.createElement('canvas'); c.width = v.width; c.height = v.height;
+    div.append(c, Object.assign(document.createElement('span'), { className: 'no', textContent: n }));
+    div.onpointerdown = e => { if (e.target === div || e.target === c) place(e, div); };
+    $('pages').append(div);
+    await page.render({ canvasContext: c.getContext('2d'), viewport: v }).promise;
+  }
+  $('msg').textContent = chosen ? `${doc.numPages} 頁，點頁面放上簽名` : `${doc.numPages} 頁，先選一個簽名`;
+  refresh();
+}
+
+function place(e, div) {
+  if (!chosen) { select(null); return; }
+  const r = div.getBoundingClientRect(), img = new Image();
+  img.onload = () => {
+    // 預設寬度是頁寬的 25%，以點下去的位置為中心
+    const w = .25, h = w * r.width * img.height / img.width / r.height;
+    const p = { n: +div.dataset.n, src: chosen, opacity: +$('opacity').value / 100,
+      x: (e.clientX - r.left) / r.width - w / 2, y: (e.clientY - r.top) / r.height - h / 2, w, h };
+    placed.push(p); draw(p, div); select(p); refresh();
+  };
+  img.src = chosen;
+}
+
+function draw(p, div) {
+  const el = document.createElement('div');
+  el.className = 'pl';
+  el.innerHTML = '<img alt=""><i title="拖曳縮放"></i><b title="移除">×</b>';
+  el.querySelector('img').src = p.src;
+  p.el = el; pos(p);
+  el.querySelector('b').onpointerdown = e => { e.stopPropagation(); remove(p); };
+  el.onpointerdown = e => {
+    if (e.target.tagName === 'B') return;
+    e.stopPropagation(); select(p);
+    const resize = e.target.tagName === 'I', r = div.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY, o = { ...p }, ratio = p.h / p.w;
+    el.setPointerCapture(e.pointerId);
+    el.onpointermove = m => {
+      const dx = (m.clientX - sx) / r.width, dy = (m.clientY - sy) / r.height;
+      if (resize) { p.w = Math.max(.02, o.w + dx); p.h = p.w * ratio; }
+      else { p.x = o.x + dx; p.y = o.y + dy; }
+      pos(p);
+    };
+    el.onpointerup = () => { el.onpointermove = null; };
+  };
+  div.append(el);
+}
+function pos(p) {
+  Object.assign(p.el.style, { left: p.x * 100 + '%', top: p.y * 100 + '%', width: p.w * 100 + '%', height: p.h * 100 + '%', opacity: p.opacity });
+}
+function select(p) {
+  sel = p;
+  for (const q of placed) q.el.classList.toggle('sel', q === p);
+  if (p) { $('opacity').value = Math.round(p.opacity * 100); $('opVal').textContent = $('opacity').value + '%'; }
+}
+function remove(p) {
+  p.el.remove(); placed = placed.filter(q => q !== p);
+  if (sel === p) sel = null;
+  refresh();
+}
+function refresh() { $('export').disabled = !placed.length; $('dl').hidden = true; }
+$('opacity').oninput = () => {
+  $('opVal').textContent = $('opacity').value + '%';
+  if (sel) { sel.opacity = $('opacity').value / 100; pos(sel); }
+};
+document.addEventListener('keydown', e => {
+  if (sel && (e.key === 'Delete' || e.key === 'Backspace') && !/INPUT|SELECT/.test(e.target.tagName)) remove(sel);
+});
+
+// ── 另存：pdf-lib 把 PNG 疊上去，原本的內容不動（文字仍可搜尋）──
+$('export').onclick = async () => {
+  $('export').disabled = true; $('msg').textContent = '產生中…'; $('msg').className = '';
+  try {
+    const out = await PDFDocument.load(bytes);
+    const cache = {};
+    for (const p of placed) {
+      const png = cache[p.src] ||= await out.embedPng(p.src);
+      const v = (await doc.getPage(p.n)).getViewport({ scale: 1 });
+      // 用 pdf.js 的 viewport 換算：CropBox 位移與 /Rotate 都在裡面。
+      // 畫面上是正的簽名，對頁面座標來說要逆時針轉回 /Rotate 的角度，錨點是畫面上的左下角
+      const [x, y] = v.convertToPdfPoint(p.x * v.width, (p.y + p.h) * v.height);
+      out.getPage(p.n - 1).drawImage(png, { x, y, width: p.w * v.width, height: p.h * v.height, rotate: degrees(v.rotation), opacity: p.opacity });
+    }
+    const blob = new Blob([await out.save()], { type: 'application/pdf' });
+    const a = $('dl');
+    if (a.href) URL.revokeObjectURL(a.href);
+    a.href = URL.createObjectURL(blob); a.download = fileName + '_簽名.pdf'; a.hidden = false;
+    $('msg').textContent = '完成';
+  } catch (e) {
+    $('msg').textContent = e.message.includes('encrypted') ? '這份 PDF 有權限保護，請先用「密碼保護」移除保護' : '產生失敗：' + e.message;
+    $('msg').className = 'warn';
+  } finally {
+    $('export').disabled = !placed.length;
+  }
+};
+</script>
+<script src="/vendor/pdf-lib-1.17.1/pdf-lib.min.js"></script>
+</body>
+</html>
