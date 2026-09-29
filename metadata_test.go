@@ -121,8 +121,9 @@ func TestGSDecryptFallback(t *testing.T) {
 		t.Skip("沒有 Ghostscript")
 	}
 	src := "testdata/pdflib_cjk.pdf"
-	// 只有權限密碼、禁止列印（開檔不用密碼）
-	locked := tmpProtectPost(t, src, map[string]string{"mode": "encrypt", "ownerPW": "o1", "print": "0"})
+	// 只有權限密碼、禁止列印（開檔不用密碼）。
+	// 用 AES-128：pdfcpu 的 AES-256 寫成 R5，gs 10.08 打不開開啟密碼為空的 R5 檔（R6、R4 都可以）
+	locked := tmpProtectPost(t, src, map[string]string{"mode": "encrypt", "ownerPW": "o1", "print": "0", "aes": "128"})
 	if !isEncrypted(locked) {
 		t.Fatal("測試檔應該是加密的")
 	}
