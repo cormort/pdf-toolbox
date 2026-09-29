@@ -22,9 +22,9 @@
 
 ```
 PdfToolbox\
-  PdfToolbox.exe          Go：內嵌 web/ 與 ICC，服務 http://127.0.0.1:17831，用 Edge --app 開視窗
+  PdfToolbox.exe          Go：內嵌 web/ 與 ICC，服務 http://127.0.0.1:17831，用 WebView2 開視窗（沒有執行階段時退回 Edge --app）
   gs\bin\                 Ghostscript 10.08.0（gswin64c + gsdll64 + VC++ 執行階段）
-  profile\                Edge 設定（首次執行產生）
+  profile\                視窗設定與 localStorage（首次執行產生；WebView2 用 profile\webview2\）
   pdf-toolbox.log         本次執行的紀錄
   pdf-toolbox.prev.log    上一次執行的紀錄（每次啟動時把上一份改名過來，當掉重開還追得到）
   pdf-toolbox-errors-*.txt 使用者按「匯出錯誤紀錄」下載的檔案
@@ -92,6 +92,7 @@ EDGE=<msedge 路徑> node hover-check.mjs   # 找不到 Edge 時自己指定
 
 打勾的項目已在 Windows 11 Pro（繁中）上以 v0.1.5–v0.1.8 驗過。
 
+- [ ] 雙擊 exe 會開 WebView2 視窗（標題列圖示、右鍵複製貼上、關閉後 90 秒內結束）
 - [x] 雙擊 exe 會開 Edge app 視窗；exe 放在含中文、空格、`&` 的路徑也可以
 - [ ] SmartScreen 警告時「其他資訊 → 仍要執行」（要用從 GitHub 下載、帶網路標記的 zip 測）
 - [x] `pdf-toolbox.log` 有寫入（v0.1.7 起；之前的版本是空檔）
@@ -101,9 +102,9 @@ EDGE=<msedge 路徑> node hover-check.mjs   # 找不到 Edge 時自己指定
 - [ ] 轉換時不會閃黑色主控台視窗（程式有設 `CREATE_NO_WINDOW`，要用眼睛看）
 - [ ] 沒裝 VC++ 可轉散發套件的乾淨電腦也能轉 CMYK
 - [x] 關掉視窗後，工作管理員裡的 PdfToolbox.exe 5 分鐘內消失
-- [x] 執行中再雙擊 exe，不會多一個 PdfToolbox.exe
+- [x] 執行中再雙擊 exe，不會多一個 PdfToolbox.exe（Edge 版；WebView2 版的第二個 exe 會留著顯示視窗，關窗即結束）
 - [ ] 執行中再雙擊 exe，畫面上多開一個視窗
-- [ ] 下載的檔案進「下載」資料夾，檔名正確（在 Edge app 視窗裡按下載）
+- [ ] 下載的檔案進「下載」資料夾，檔名正確（WebView2 視窗裡按下載）
 - [x] 頁面重組的目次、頁碼、浮水印中文用標楷體（`C:\Windows\Fonts\kaiu.ttf`）嵌入並正常顯示；英文版 Windows 需先裝「繁體中文補充字型」
 
 ## 待辦

@@ -1,5 +1,5 @@
 // PDF Toolbox：把幾個前端 PDF／表格工具與 CMYK 轉換包成可攜版。
-// 啟動本機 HTTP 服務，再用 Edge 的 app 模式開視窗；視窗關掉後一段時間沒請求就自動結束。
+// 啟動本機 HTTP 服務，再用 WebView2 開視窗（沒有時退回 Edge 的 app 模式）；視窗關掉後一段時間沒請求就自動結束。
 package main
 
 import (
@@ -50,7 +50,9 @@ func main() {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		if r, err := http.Get(url + "api/ping"); err == nil && r.StatusCode == 200 {
-			openWindow(url) // 已經在跑：只開視窗
+			if !showWindow(url) { // 已經在跑：只開視窗
+				openWindow(url)
+			}
 			return
 		}
 		log.Fatalf("port %s 被其他程式占用：%v", addr, err)
@@ -88,14 +90,20 @@ func main() {
 	mux.HandleFunc("GET /api/file/{id}/{name}", handleFile)
 
 	lastHit.Store(time.Now().Unix())
-	if !*dev {
-		go openWindow(url)
-		go exitWhenIdle(5 * time.Minute)
-	}
 	log.Println("PDF Toolbox 服務：", url)
 	// 不加 WriteTimeout／IdleTimeout：CMYK 轉換可能跑好幾分鐘
 	srv := &http.Server{Handler: guard(mux), ReadHeaderTimeout: 10 * time.Second}
-	log.Fatal(srv.Serve(ln))
+	if *dev {
+		log.Fatal(srv.Serve(ln))
+	}
+	go func() { log.Fatal(srv.Serve(ln)) }()
+	// 視窗在主執行緒跑到關掉為止。關掉後不立刻結束：別的 exe 開的視窗（再雙擊）還連著這個服務，
+	// 它們的首頁每 30 秒 ping 一次，90 秒都沒有請求才收。
+	if showWindow(url) {
+		exitWhenIdle(90 * time.Second)
+	}
+	openWindow(url) // 沒有 WebView2：退回 Edge --app
+	exitWhenIdle(5 * time.Minute)
 }
 
 func guard(h http.Handler) http.Handler {
