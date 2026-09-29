@@ -5,6 +5,10 @@ cd "$(dirname "$0")"
 # Windows 裝 7-Zip 預設不會加進 PATH
 command -v 7z >/dev/null || [ ! -x "/c/Program Files/7-Zip/7z.exe" ] || PATH="/c/Program Files/7-Zip:$PATH"
 command -v go >/dev/null || { echo "找不到 go：請正式安裝 Go（版本以 go.mod 為準），重開終端機再跑" >&2; exit 1; }
+# 可攜版要能離線、不對外連線；追蹤碼混進來就不打包（sync.sh 會拿掉，手動加的擋在這裡）
+if grep -rlE "googletagmanager|google-analytics" web/; then
+  echo "✗ 上面的檔案含 Google Analytics：可攜版不帶追蹤碼，請拿掉再打包" >&2; exit 1
+fi
 GS_TAG=gs10080   # Ghostscript 10.08.0，官方 Artifex 釋出
 out=dist/PdfToolbox
 

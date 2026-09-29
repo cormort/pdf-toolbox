@@ -39,7 +39,7 @@ vendor https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs        
 vendor https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs  pdfjs-4.10.38/pdf.worker.min.mjs
 vendor https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.3/jspdf.umd.min.js       jspdf-3.0.3/jspdf.umd.min.js
 
-for f in web/row-shifter/index.html web/xls2spread/index.html web/diffpdf/index.html web/viewer/index.html web/recompose/index.html; do
+for f in web/row-shifter/index.html web/xls2spread/index.html web/diffpdf/index.html web/viewer/index.html web/viewer/instructions.html web/recompose/index.html web/recompose/instruction.html; do
   perl -0pi -e '
     s{<!-- Google tag \(gtag\.js\) -->.*?</script>\s*<script>.*?</script>\n?}{}s;
     s{<link[^>]*fonts\.(googleapis|gstatic)\.com[^>]*>\n?}{}g;
