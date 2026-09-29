@@ -3,6 +3,7 @@
 把幾個 PDF／表格小工具包成 **Windows x64 可攜版**：解壓縮、雙擊 `PdfToolbox.exe` 就能用，免安裝、可離線，檔案不離開本機。
 
 **下載**：到 [Releases](https://github.com/cormort/pdf-toolbox/releases) 點最上面那一版，在 Assets 下載 `PdfToolbox.zip`。
+解壓縮前先在 zip 上按右鍵 →「內容」→ 勾「解除封鎖」，執行時就不會跳 SmartScreen（沒勾的話點「其他資訊 → 仍要執行」）。
 
 | 分頁 | 來源 | 說明 |
 |---|---|---|
